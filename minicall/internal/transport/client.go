@@ -73,6 +73,10 @@ func (c *Client) StreamJSON(ctx context.Context, path string, headers map[string
 	var eventData []string
 	for scanner.Scan() {
 		// TODO 这里思考需要加 c.Done() 监听吗？
+		// 我这里进行context的直接检查
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		line := scanner.Text()
 		// 注意每个事件之间有一个空行。
 		// 所以空行表示一个SSE event结束，表示可以发送 data: 行了
