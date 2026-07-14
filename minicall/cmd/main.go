@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"time"
+
+	"github.com/Effortful-lion/agent-study/minicall/internal/ai"
 )
 
 func main() {
@@ -32,4 +36,27 @@ func main() {
 	flag.StringVar(&question, "q", "你是什么模型？", "输入提问内容简写")
 	flag.Parse()
 
+	// 3. ask to ai 问题：我们这里需要调用ai能力，但是ai能力封装在 internal 中
+	client := ai.NewChatModel(ai.Config{
+		Model:   model,
+		BaseURL: baseurl,
+		APIKey:  apikey,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	resp, err := client.InvokeChat(ctx, question)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	fmt.Printf(
+		"token: input=%d output=%d total=%d\n",
+		resp.Usage.PromptTokens,
+		resp.Usage.CompletionTokens,
+		resp.Usage.TotalTokens,
+	)
+	fmt.Println(resp.Choices[0].Message.Content)
 }

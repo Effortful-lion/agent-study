@@ -1,87 +1,46 @@
 package ai
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"time"
 
-	"github.com/Effortful-lion/agent-study/minicall/internal"
+	"github.com/Effortful-lion/agent-study/minicall/internal/llm"
+	"github.com/Effortful-lion/agent-study/minicall/internal/transport"
 )
 
-type Deepseek struct {
-	Name string
+type Config struct {
+	Model   string
+	BaseURL string
+	APIKey  string
 }
 
-func NewDeepseek() *Deepseek {
-	return &Deepseek{
-		Name: "Deepseek",
+type ChatModel struct {
+	cfg       Config
+	transport *transport.Client
+}
+
+func NewChatModel(cfg Config) *ChatModel {
+	return &ChatModel{
+		cfg:       cfg,
+		transport: transport.NewClient(cfg.BaseURL),
 	}
 }
 
-func (d Deepseek) ModelName() string {
-	return d.Name
-}
-
-func Invoke(model string, baseurl string, apikey string, question string) {
-	// 3. invoke the model
-	payload := internal.ChatRequest{
-		Model: model,
-		Messages: []internal.Message{
+// 非流式一次性调用
+func (c *ChatModel) InvokeChat(ctx context.Context, question string) (*llm.ChatResponse, error) {
+	req := llm.ChatRequest{
+		Model: c.cfg.Model,
+		Messages: []llm.Message{
 			{Role: "user", Content: question},
 		},
 		Stream: false,
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+	var resp llm.ChatResponse
+	if err := c.transport.PostJSON(ctx, "/chat/completions", map[string]string{
+		"Authorization": "Bearer " + c.cfg.APIKey,
+	}, req, &resp); err != nil {
+		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		baseurl+"/chat/completions",
-		bytes.NewReader(body),
-	)
-	if err != nil {
-		panic(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apikey)
-	// 4. return not stream
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		panic("unexpected status code: " + resp.Status)
-	}
-
-	// solve the response
-	var result internal.ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Fatal(err)
-	}
-	if len(result.Choices) == 0 {
-		log.Fatal("模型响应中没有 choices")
-	}
-	if result.Usage.PromptTokens == 0 || result.Usage.CompletionTokens == 0 || result.Usage.TotalTokens == 0 {
-		log.Fatal("模型响应中 usage 未取到")
-	}
-	fmt.Printf(
-		"token: input=%d output=%d total=%d\n",
-		result.Usage.PromptTokens,
-		result.Usage.CompletionTokens,
-		result.Usage.TotalTokens,
-	)
-	fmt.Println(result.Choices[0].Message.Content)
+	return &resp, nil
 }
