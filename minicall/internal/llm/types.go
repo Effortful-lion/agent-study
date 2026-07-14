@@ -22,3 +22,9 @@ type ChatResponse struct {
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
 }
+
+type ChatStreamResponse struct {
+	Choices []struct {
+		Delta Message `json:"delta"`
+	} `json:"choices"`
+}

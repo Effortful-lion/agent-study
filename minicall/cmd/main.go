@@ -46,17 +46,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	resp, err := client.InvokeChat(ctx, question)
-	if err != nil {
+	if err := client.StreamInvokeChat(ctx, question, os.Stdout); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-
-	fmt.Printf(
-		"token: input=%d output=%d total=%d\n",
-		resp.Usage.PromptTokens,
-		resp.Usage.CompletionTokens,
-		resp.Usage.TotalTokens,
-	)
-	fmt.Println(resp.Choices[0].Message.Content)
+	fmt.Println()
 }
