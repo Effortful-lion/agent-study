@@ -82,7 +82,7 @@ func (c *Client) StreamJSON(ctx context.Context, path string, headers map[string
 		// 所以空行表示一个SSE event结束，表示可以发送 data: 行了
 		if line == "" {
 			if len(eventData) == 0 {
-				return nil
+				continue
 			}
 			data := strings.Join(eventData, "\n")
 			err := onData(data)
@@ -97,6 +97,9 @@ func (c *Client) StreamJSON(ctx context.Context, path string, headers map[string
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return err
 	}
 	if len(eventData) == 0 {

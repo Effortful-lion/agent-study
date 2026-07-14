@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/Effortful-lion/agent-study/minicall/internal/ai"
+	"github.com/Effortful-lion/agent-study/minicall/internal/llm"
+	"github.com/Effortful-lion/agent-study/minicall/pkg/stream"
 )
 
 var (
@@ -19,63 +21,6 @@ var (
 	baseurl  string
 	question string
 )
-
-func main() {
-	// 配置环境变量
-	Getenv()
-
-	// cli cmd
-	CLICmd()
-
-	// 3. ask to ai 问题：我们这里需要调用ai能力，但是ai能力封装在 internal 中
-	client := ai.NewChatModel(ai.Config{
-		Model:   model,
-		BaseURL: baseurl,
-		APIKey:  apikey,
-	})
-
-	// 全局链路超时控制
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	// 用户取消信号
-	// 意思是：请 Go runtime 帮我把这些操作系统信号转发到 userClosed 这个 channel 里
-	userClosed := make(chan os.Signal, 1)
-	signal.Notify(userClosed, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(userClosed)
-	go func() {
-		<-userClosed
-		cancel()
-	}()
-
-	// 流式调用
-	if err := client.StreamInvokeChat(ctx, question, os.Stdout); err != nil {
-		if errors.Is(err, context.Canceled) {
-			fmt.Println("\n用户取消")
-			return
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			fmt.Println("\n请求超时")
-			return
-		}
-
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	// 非流式调用
-	//result, err := client.InvokeChat(ctx, question)
-	//if err != nil {
-	//	fmt.Println(err)
-	//	os.Exit(1)
-	//}
-	//fmt.Println(result.Choices[0].Message.Content)
-	//fmt.Printf(
-	//	"token: input=%d output=%d total=%d\n",
-	//	result.Usage.PromptTokens,
-	//	result.Usage.CompletionTokens,
-	//	result.Usage.TotalTokens,
-	//)
-}
 
 func CLICmd() {
 	// 2. new a question
@@ -103,4 +48,79 @@ func Getenv() {
 		fmt.Println("Please set model environment variable, eg: export LLM_MODEL=deepseek-v4-pro")
 		os.Exit(1)
 	}
+}
+
+func main() {
+	// 配置环境变量
+	Getenv()
+
+	// cli cmd
+	CLICmd()
+
+	// 3. ask to ai 问题：我们这里需要调用ai能力，但是ai能力封装在 internal 中
+	client := ai.NewDeepSeekModel(ai.Config{
+		Name:    "deepseek",
+		Model:   model,
+		BaseURL: baseurl,
+		APIKey:  apikey,
+	})
+	var provider llm.Provider = client
+
+	// 全局链路超时控制
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// 用户取消信号
+	// 意思是：请 Go runtime 帮我把这些操作系统信号转发到 userClosed 这个 channel 里
+	userClosed := make(chan os.Signal, 1)
+	signal.Notify(userClosed, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(userClosed)
+	go func() {
+		<-userClosed
+		cancel()
+	}()
+
+	// 流式调用
+	streamChan, err := provider.ChatStream(ctx, llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: question},
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	if err := stream.Process(ctx, streamChan, func(chunk llm.StreamChunk) error {
+		if chunk.Err != nil {
+			return chunk.Err
+		}
+		_, err := fmt.Fprint(os.Stdout, chunk.Content)
+		return err
+	}); err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Println("\n用户取消")
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			fmt.Println("\n请求超时")
+			return
+		}
+
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	// 非流式调用
+	//result, err := client.InvokeChat(ctx, question)
+	//if err != nil {
+	//	fmt.Println(err)
+	//	os.Exit(1)
+	//}
+	//fmt.Println(result.Choices[0].Message.Content)
+	//fmt.Printf(
+	//	"token: input=%d output=%d total=%d\n",
+	//	result.Usage.PromptTokens,
+	//	result.Usage.CompletionTokens,
+	//	result.Usage.TotalTokens,
+	//)
 }

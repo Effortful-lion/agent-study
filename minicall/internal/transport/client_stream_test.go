@@ -54,13 +54,16 @@ func TestClientStreamJSONReadsSSEEvents(t *testing.T) {
 	if !strings.Contains(gotBody, "\"stream\":true") {
 		t.Fatalf("body = %q, want stream true", gotBody)
 	}
-	if len(events) != 2 {
-		t.Fatalf("events = %d, want 2", len(events))
+	if len(events) != 3 {
+		t.Fatalf("events = %d, want 3", len(events))
 	}
 	if events[0] != "{\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}" {
 		t.Fatalf("first event = %q", events[0])
 	}
 	if events[1] != "{\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}" {
 		t.Fatalf("second event = %q", events[1])
+	}
+	if events[2] != "[DONE]" {
+		t.Fatalf("third event = %q", events[2])
 	}
 }
