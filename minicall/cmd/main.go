@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/Effortful-lion/agent-study/minicall/internal/ai"
@@ -31,11 +34,31 @@ func main() {
 		APIKey:  apikey,
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	// 全局链路超时控制
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+
+	// 用户取消信号
+	// 意思是：请 Go runtime 帮我把这些操作系统信号转发到 userClosed 这个 channel 里
+	userClosed := make(chan os.Signal, 1)
+	signal.Notify(userClosed, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(userClosed)
+	go func() {
+		<-userClosed
+		cancel()
+	}()
 
 	// 流式调用
 	if err := client.StreamInvokeChat(ctx, question, os.Stdout); err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Println("\n用户取消")
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			fmt.Println("\n请求超时")
+			return
+		}
+
 		fmt.Println(err)
 		os.Exit(1)
 	}

@@ -53,7 +53,7 @@ func (c *Client) StreamJSON(ctx context.Context, path string, headers map[string
 		return fmt.Errorf("unexpected status code: %s", resp.Status)
 	}
 
-	// 从网络io scan
+	// 从网络io scan数据
 	scanner := bufio.NewScanner(resp.Body)
 	// 一个 sse 事件可以有多行 data：
 	/*
@@ -72,6 +72,7 @@ func (c *Client) StreamJSON(ctx context.Context, path string, headers map[string
 	*/
 	var eventData []string
 	for scanner.Scan() {
+		// TODO 这里思考需要加 c.Done() 监听吗？
 		line := scanner.Text()
 		// 注意每个事件之间有一个空行。
 		// 所以空行表示一个SSE event结束，表示可以发送 data: 行了
