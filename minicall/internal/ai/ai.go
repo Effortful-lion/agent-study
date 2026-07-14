@@ -51,6 +51,7 @@ func (c *ChatModel) StreamInvokeChat(ctx context.Context, question string, out i
 			if choice.Delta.Content == "" {
 				continue
 			}
+			// 输出到标准输出-控制台
 			if _, err := io.WriteString(out, choice.Delta.Content); err != nil {
 				return err
 			}
