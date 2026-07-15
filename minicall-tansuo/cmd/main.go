@@ -10,9 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Effortful-lion/agent-study/minicall/internal/ai"
-	"github.com/Effortful-lion/agent-study/minicall/internal/llm"
-	"github.com/Effortful-lion/agent-study/minicall/pkg/stream"
+	"github.com/Effortful-lion/agent-study/minicall-tansuo/internal/ai"
+	"github.com/Effortful-lion/agent-study/minicall-tansuo/internal/llm"
 )
 
 var (
@@ -66,38 +65,20 @@ func main() {
 	})
 	var provider llm.Provider = client
 
-	// 全局链路超时控制
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// Ctrl+C 会直接取消 ctx，并贯穿到 http.NewRequestWithContext 绑定的请求。
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// 全局链路超时控制。
+	ctx, cancel := context.WithTimeout(signalCtx, 5*time.Minute)
 	defer cancel()
 
-	// 用户取消信号
-	// 意思是：请 Go runtime 帮我把这些操作系统信号转发到 userClosed 这个 channel 里
-	userClosed := make(chan os.Signal, 1)
-	signal.Notify(userClosed, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(userClosed)
-	go func() {
-		<-userClosed
-		cancel()
-	}()
-
-	// 流式调用
-	streamChan, err := provider.ChatStream(ctx, llm.ChatRequest{
+	resp, err := provider.Chat(ctx, llm.ChatRequest{
 		Messages: []llm.Message{
 			{Role: llm.RoleUser, Content: llm.TextContent(question)},
 		},
 	})
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-
-	if err := stream.Process(ctx, streamChan, func(chunk llm.StreamChunk) error {
-		if chunk.Err != nil {
-			return chunk.Err
-		}
-		_, err := fmt.Fprint(os.Stdout, chunk.Content)
-		return err
-	}); err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Println("\n用户取消")
 			return
@@ -110,17 +91,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	// 非流式调用
-	//result, err := client.InvokeChat(ctx, question)
-	//if err != nil {
-	//	fmt.Println(err)
-	//	os.Exit(1)
-	//}
-	//fmt.Println(result.Choices[0].Message.Content)
-	//fmt.Printf(
-	//	"token: input=%d output=%d total=%d\n",
-	//	result.Usage.PromptTokens,
-	//	result.Usage.CompletionTokens,
-	//	result.Usage.TotalTokens,
-	//)
+
+	fmt.Println(resp.Content)
+	fmt.Printf("token: input=%d output=%d\n", resp.InputTokens, resp.OutputTokens)
 }

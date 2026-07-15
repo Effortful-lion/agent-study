@@ -131,6 +131,76 @@ func TestNewHTTPClientRetriesThroughRoundTripper(t *testing.T) {
 	}
 }
 
+func TestClientDoUsesBaseURLAndRetries(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %q, want /chat/completions", r.URL.Path)
+		}
+		if attempts < 2 {
+			http.Error(w, "try again", http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "/chat/completions", strings.NewReader(`{"hello":"world"}`))
+	if err != nil {
+		t.Fatalf("NewRequestWithContext returned error: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+}
+
+func TestRetryAfter(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want time.Duration
+		ok   bool
+	}{
+		{name: "empty", raw: "", ok: false},
+		{name: "seconds", raw: "2", want: 2 * time.Second, ok: true},
+		{name: "invalid seconds", raw: "abc", ok: false},
+		{name: "http date", raw: time.Now().Add(2 * time.Second).UTC().Format(http.TimeFormat), ok: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := retryAfter(tt.raw)
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.ok)
+			}
+			if !tt.ok {
+				return
+			}
+			if tt.name == "http date" {
+				if got <= 0 || got > 3*time.Second {
+					t.Fatalf("duration = %s, want about 2s", got)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Fatalf("duration = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestClientPostJSONRetriesServerErrors(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

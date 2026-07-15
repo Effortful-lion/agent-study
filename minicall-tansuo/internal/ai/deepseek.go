@@ -1,7 +1,11 @@
 package ai
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 
 	"github.com/Effortful-lion/agent-study/minicall/internal/llm"
 	"github.com/Effortful-lion/agent-study/minicall/internal/transport"
@@ -37,19 +41,36 @@ func (c *DeepSeekModel) Chat(ctx context.Context, req llm.ChatRequest) (*llm.Cha
 	req.Model = c.model(req.Model)
 	req.Stream = false
 
-	var raw openAIChatResponse
-	if err := c.transport.PostJSON(ctx, "/chat/completions", c.authHeaders(), req, &raw); err != nil {
+	body, err := llm.SafeMarshal(req)
+	if err != nil {
 		return nil, err
 	}
 
-	resp := &llm.ChatResponse{
-		InputTokens:  raw.Usage.PromptTokens,
-		OutputTokens: raw.Usage.CompletionTokens,
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
 	}
-	if len(raw.Choices) > 0 {
-		resp.Content = raw.Choices[0].Message.Content.Text
+	httpReq.Header.Set("Content-Type", "application/json")
+	for k, v := range c.authHeaders() {
+		httpReq.Header.Set(k, v)
 	}
-	return resp, nil
+
+	httpResp, err := c.transport.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %s", httpResp.Status)
+	}
+
+	var raw openAIChatResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+
+	return raw.toChatResponse(), nil
 }
 
 func (c *DeepSeekModel) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan llm.StreamChunk, error) {
@@ -114,6 +135,17 @@ type openAIChatResponse struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 	} `json:"usage"`
+}
+
+func (r openAIChatResponse) toChatResponse() *llm.ChatResponse {
+	resp := &llm.ChatResponse{
+		InputTokens:  r.Usage.PromptTokens,
+		OutputTokens: r.Usage.CompletionTokens,
+	}
+	if len(r.Choices) > 0 {
+		resp.Content = r.Choices[0].Message.Content.Text
+	}
+	return resp
 }
 
 type openAIChatStreamResponse struct {

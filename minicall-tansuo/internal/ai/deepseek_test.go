@@ -2,6 +2,8 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,7 +13,21 @@ import (
 )
 
 func TestChatModelImplementsProviderChat(t *testing.T) {
+	var gotAuth string
+	var gotRequest llm.ChatRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %q, want /chat/completions", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll returned error: %v", err)
+		}
+		if err := json.Unmarshal(body, &gotRequest); err != nil {
+			t.Fatalf("request body is not ChatRequest: %v", err)
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"choices":[{"message":{"role":"assistant","content":"pong"}}],
@@ -33,6 +49,18 @@ func TestChatModelImplementsProviderChat(t *testing.T) {
 		t.Fatalf("Chat returned error: %v", err)
 	}
 
+	if gotAuth != "Bearer sk-test" {
+		t.Fatalf("authorization = %q, want Bearer sk-test", gotAuth)
+	}
+	if gotRequest.Model != "deepseek-chat" {
+		t.Fatalf("model = %q, want deepseek-chat", gotRequest.Model)
+	}
+	if gotRequest.Stream {
+		t.Fatal("stream = true, want false")
+	}
+	if len(gotRequest.Messages) != 1 || gotRequest.Messages[0].Content.Text != "ping" {
+		t.Fatalf("messages = %#v, want ping", gotRequest.Messages)
+	}
 	if resp.Content != "pong" {
 		t.Fatalf("content = %q, want pong", resp.Content)
 	}
