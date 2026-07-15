@@ -47,7 +47,7 @@ func (c *DeepSeekModel) Chat(ctx context.Context, req llm.ChatRequest) (*llm.Cha
 		OutputTokens: raw.Usage.CompletionTokens,
 	}
 	if len(raw.Choices) > 0 {
-		resp.Content = raw.Choices[0].Message.Content
+		resp.Content = raw.Choices[0].Message.Content.Text
 	}
 	return resp, nil
 }
@@ -70,13 +70,13 @@ func (c *DeepSeekModel) ChatStream(ctx context.Context, req llm.ChatRequest) (<-
 				return err
 			}
 			for _, choice := range raw.Choices {
-				if choice.Delta.Content == "" {
+				if choice.Delta.Content.Text == "" {
 					continue
 				}
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case ch <- llm.StreamChunk{Content: choice.Delta.Content}:
+				case ch <- llm.StreamChunk{Content: choice.Delta.Content.Text}:
 				}
 			}
 			return nil

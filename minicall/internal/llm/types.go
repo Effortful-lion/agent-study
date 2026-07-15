@@ -21,8 +21,13 @@ type Provider interface {
 
 // Message chat Prompt
 type Message struct {
-	Role    Role   `json:"role"`
-	Content string `json:"content"`
+	Role    Role           `json:"role"`
+	Content MessageContent `json:"content"`
+}
+
+// TextContent 快速构造纯文本 content，同时保留 MessageContent 的多模态扩展能力。
+func TextContent(text string) MessageContent {
+	return MessageContent{Text: text}
 }
 
 // ChatRequest req

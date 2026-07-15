@@ -83,7 +83,7 @@ func main() {
 	// 流式调用
 	streamChan, err := provider.ChatStream(ctx, llm.ChatRequest{
 		Messages: []llm.Message{
-			{Role: llm.RoleUser, Content: question},
+			{Role: llm.RoleUser, Content: llm.TextContent(question)},
 		},
 	})
 	if err != nil {

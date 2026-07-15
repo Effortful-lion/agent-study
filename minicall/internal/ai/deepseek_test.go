@@ -27,7 +27,7 @@ func TestChatModelImplementsProviderChat(t *testing.T) {
 	})
 
 	resp, err := provider.Chat(context.Background(), llm.ChatRequest{
-		Messages: []llm.Message{{Role: llm.RoleUser, Content: "ping"}},
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: llm.TextContent("ping")}},
 	})
 	if err != nil {
 		t.Fatalf("Chat returned error: %v", err)
@@ -58,7 +58,7 @@ func TestChatModelChatStreamReturnsChunks(t *testing.T) {
 	})
 
 	ch, err := provider.ChatStream(context.Background(), llm.ChatRequest{
-		Messages: []llm.Message{{Role: llm.RoleUser, Content: "ping"}},
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: llm.TextContent("ping")}},
 	})
 	if err != nil {
 		t.Fatalf("ChatStream returned error: %v", err)
