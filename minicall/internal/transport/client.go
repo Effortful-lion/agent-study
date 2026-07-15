@@ -53,17 +53,26 @@ const (
 
 // Client 是传输层客户端，负责把 JSON/SSE 调用统一封装为可复用的 HTTP 能力。
 type Client struct {
-	httpClient *http.Client  // 底层 HTTP 执行器，只配置 Transport，不设置全局 Timeout。
-	baseURL    string        // 上游 API 根地址，创建时去掉末尾斜杠，调用时拼接 path。
-	limiter    chan struct{} // 并发令牌桶，每次请求发送前占用一个令牌，结束后归还。
+	httpClient *http.Client // 底层 HTTP 执行器，只配置 Transport，不设置全局 Timeout。
+	baseURL    string       // 上游 API 根地址，创建时去掉末尾斜杠，调用时拼接 path。
 }
 
 // NewClient 创建生产级 HTTP 客户端，调用方继续通过 context 管理每次请求的生命周期。
 func NewClient(baseURL string) *Client {
 	return &Client{
-		httpClient: &http.Client{Transport: newTransport()},
+		httpClient: NewHTTPClient(),
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		limiter:    make(chan struct{}, defaultMaxConcurrentRequests),
+	}
+}
+
+// NewHTTPClient 返回一个普通 *http.Client，但它的 Transport 已经内置限流和重试。
+func NewHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &retryTransport{
+			base:    newTransport(),
+			retry:   defaultRetryConfig(),
+			limiter: newRequestLimiter(defaultMaxConcurrentRequests),
+		},
 	}
 }
 
@@ -86,6 +95,109 @@ func newTransport() *http.Transport {
 	}
 }
 
+// retryConfig 描述重试策略，字段保持简单，避免调用方理解复杂概念。
+type retryConfig struct {
+	maxRetries int           // 额外重试次数；总请求次数为 1 + maxRetries。
+	baseDelay  time.Duration // 指数退避的初始等待时间。
+	maxDelay   time.Duration // 单次退避等待的上限。
+}
+
+// defaultRetryConfig 返回当前客户端的默认重试策略。
+func defaultRetryConfig() retryConfig {
+	return retryConfig{
+		maxRetries: defaultMaxRetries,
+		baseDelay:  defaultRetryBaseDelay,
+		maxDelay:   defaultRetryMaxDelay,
+	}
+}
+
+// requestLimiter 是很薄的并发限流器，用 channel 控制同时进入底层 Transport 的请求数。
+type requestLimiter struct {
+	tokens chan struct{} // 每个 token 代表一个可执行请求的并发名额。
+}
+
+// newRequestLimiter 创建固定并发上限的请求限流器。
+func newRequestLimiter(maxConcurrent int) *requestLimiter {
+	return &requestLimiter{tokens: make(chan struct{}, maxConcurrent)}
+}
+
+// wait 获取一个并发名额；如果请求 context 已取消，则立即返回 context 错误。
+func (l *requestLimiter) wait(ctx context.Context) error {
+	select {
+	case l.tokens <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// done 归还并发名额，必须和 wait 成对出现。
+func (l *requestLimiter) done() {
+	<-l.tokens
+}
+
+// retryTransport 是一层 http.RoundTripper 中间件，把限流和重试变成 HTTP 执行链路的一部分。
+type retryTransport struct {
+	base    http.RoundTripper // 真正负责发请求的底层 Transport，通常是 *http.Transport。
+	retry   retryConfig       // 非流式和流式请求在拿到最终响应前共享的重试策略。
+	limiter *requestLimiter   // 可为空；为空时只重试不限流。
+}
+
+// RoundTrip 先做 context 可取消的限流，再把请求交给底层 Transport，并对临时失败做有限重试。
+func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	ctx := req.Context()
+	if t.limiter != nil {
+		if err := t.limiter.wait(ctx); err != nil {
+			return nil, err
+		}
+		defer t.limiter.done()
+	}
+
+	if req.Body != nil && req.GetBody != nil {
+		// RoundTripper 需要负责关闭传入的 Body；重试时每轮使用 GetBody 生成独立副本。
+		defer req.Body.Close()
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= t.retry.maxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		nextReq, err := cloneRequestForAttempt(req, attempt)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := t.base.RoundTrip(nextReq)
+		if err == nil && !shouldRetry(resp.StatusCode) {
+			return resp, nil
+		}
+
+		if err != nil {
+			if !canRetryRequestBody(req) {
+				return nil, err
+			}
+			lastErr = err
+		} else {
+			if !canRetryRequestBody(req) {
+				return resp, nil
+			}
+			lastErr = fmt.Errorf("服务端返回 %d", resp.StatusCode)
+			closeResponseForRetry(resp)
+		}
+
+		if attempt == t.retry.maxRetries {
+			break
+		}
+		if err := sleepBackoff(ctx, attempt, t.retry); err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("重试 %d 次后仍失败: %w", t.retry.maxRetries, lastErr)
+}
+
 // StreamJSON 发起 SSE 流式 JSON 请求，并把每个 data 事件交给 onData 逐条处理。
 func (c *Client) StreamJSON(ctx context.Context, path string, headers map[string]string, payload any, onData func(string) error) error {
 	// 请求体只序列化一次；流式请求不做重试，避免上游已输出部分内容后重复消费。
@@ -105,8 +217,8 @@ func (c *Client) StreamJSON(ctx context.Context, path string, headers map[string
 		req.Header.Set(k, v)
 	}
 
-	// c.do 统一经过并发限流；底层 Transport 负责复用连接池中的空闲连接。
-	resp, err := c.do(req)
+	// 限流和重试已经隐藏在 http.Client.Transport 中，这里按普通 HTTP 请求使用即可。
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -172,91 +284,73 @@ func (c *Client) StreamJSON(ctx context.Context, path string, headers map[string
 	return onData(data)
 }
 
-// PostJSON 发起普通 JSON 请求，针对临时性失败做有限重试并把成功响应解析到 out。
+// PostJSON 发起普通 JSON 请求，并把成功响应解析到 out；重试和限流由 http.Client.Transport 统一处理。
 func (c *Client) PostJSON(ctx context.Context, path string, headers map[string]string, payload any, out any) error {
-	// body 必须提前序列化成 []byte，保证每次重试都能重新创建可读取的请求体。
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 
-	var lastErr error
-	for attempt := 0; attempt <= defaultMaxRetries; attempt++ {
-		// 每轮开始前先检查 context，避免已取消时继续排队、建连或等待退避。
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		// 每次重试都新建 Request，避免复用已被 http.Client 消费过的 Body。
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-
-		resp, err := c.do(req)
-		if err != nil {
-			// 如果错误来自调用方取消或超时，直接返回 context 错误，不再重试。
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
-			}
-			// 其他网络错误按临时失败处理，等待指数退避后继续尝试。
-			lastErr = err
-			if attempt == defaultMaxRetries {
-				return lastErr
-			}
-			if err := sleepBackoff(ctx, attempt); err != nil {
-				return err
-			}
-			continue
-		}
-
-		if shouldRetry(resp.StatusCode) {
-			// 429/5xx 通常代表限流或服务端临时异常，适合做有限重试。
-			lastErr = fmt.Errorf("unexpected status code: %s", resp.Status)
-			// 重试前必须读完并关闭响应体，Transport 才有机会复用底层连接。
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
-			if attempt == defaultMaxRetries {
-				return lastErr
-			}
-			if err := sleepBackoff(ctx, attempt); err != nil {
-				return err
-			}
-			continue
-		}
-		defer resp.Body.Close()
-
-		// 非重试状态直接返回给调用方，避免把 4xx 这类业务/参数错误伪装成临时失败。
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status code: %s", resp.Status)
-		}
-
-		// 成功响应由调用方提供 out 承接，transport 层不关心具体业务结构。
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return err
-		}
-		return nil
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
-	return lastErr
+	// 调用方只看到一次普通 Do；失败重试、退避等待和并发限流都由 retryTransport 完成。
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %s", resp.Status)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return err
+	}
+	return nil
 }
 
-// do 统一执行 HTTP 请求，并在进入 http.Client.Do 前做 context 可取消的并发限流。
-func (c *Client) do(req *http.Request) (*http.Response, error) {
-	select {
-	case c.limiter <- struct{}{}:
-		// 请求结束后归还令牌，保证后续请求可以继续进入连接池执行。
-		defer func() { <-c.limiter }()
-	case <-req.Context().Done():
-		return nil, req.Context().Err()
+// cloneRequestForAttempt 为每次请求尝试准备独立 Request，避免 RoundTripper 修改原始 req。
+func cloneRequestForAttempt(req *http.Request, attempt int) (*http.Request, error) {
+	if req.Body == nil {
+		return req.Clone(req.Context()), nil
 	}
 
-	// 真正的 HTTP 执行交给标准库；连接复用、建连超时和 TLS 超时由 Transport 处理。
-	return c.httpClient.Do(req)
+	if req.GetBody == nil {
+		if attempt == 0 {
+			return req, nil
+		}
+		return nil, fmt.Errorf("请求体不支持重试")
+	}
+
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, err
+	}
+	cloned := req.Clone(req.Context())
+	cloned.Body = body
+	return cloned, nil
+}
+
+// canRetryRequestBody 判断请求体是否能为下一次重试重新打开。
+func canRetryRequestBody(req *http.Request) bool {
+	return req.Body == nil || req.GetBody != nil
+}
+
+// closeResponseForRetry 关闭可重试响应，并尽量读完 Body 以便底层连接回到连接池。
+func closeResponseForRetry(resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 }
 
 // shouldRetry 判断响应状态是否属于可重试的临时性失败。
@@ -265,11 +359,11 @@ func shouldRetry(statusCode int) bool {
 }
 
 // sleepBackoff 按指数退避加随机抖动等待，并在等待期间响应 context 取消。
-func sleepBackoff(ctx context.Context, attempt int) error {
+func sleepBackoff(ctx context.Context, attempt int, retry retryConfig) error {
 	// 退避时间随 attempt 翻倍，减少高并发失败时对上游的同步重压。
-	delay := defaultRetryBaseDelay << attempt
-	if delay > defaultRetryMaxDelay {
-		delay = defaultRetryMaxDelay
+	delay := retry.baseDelay << attempt
+	if delay > retry.maxDelay {
+		delay = retry.maxDelay
 	}
 	// 抖动让不同请求的重试时间错开，降低重试风暴概率。
 	delay += time.Duration(rand.Int63n(int64(delay / 2)))

@@ -76,9 +76,14 @@ func TestNewClientUsesTransportTimeoutsWithoutGlobalClientTimeout(t *testing.T) 
 		t.Fatalf("http client timeout = %s, want no global timeout", client.httpClient.Timeout)
 	}
 
-	tr, ok := client.httpClient.Transport.(*http.Transport)
+	retryTr, ok := client.httpClient.Transport.(*retryTransport)
 	if !ok {
-		t.Fatalf("transport = %T, want *http.Transport", client.httpClient.Transport)
+		t.Fatalf("transport = %T, want *retryTransport", client.httpClient.Transport)
+	}
+
+	tr, ok := retryTr.base.(*http.Transport)
+	if !ok {
+		t.Fatalf("base transport = %T, want *http.Transport", retryTr.base)
 	}
 	if tr.MaxIdleConns == 0 {
 		t.Fatal("MaxIdleConns = 0, want configured connection pool")
@@ -91,6 +96,38 @@ func TestNewClientUsesTransportTimeoutsWithoutGlobalClientTimeout(t *testing.T) 
 	}
 	if tr.TLSHandshakeTimeout == 0 {
 		t.Fatal("TLSHandshakeTimeout = 0, want configured TLS handshake timeout")
+	}
+}
+
+func TestNewHTTPClientRetriesThroughRoundTripper(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			http.Error(w, "try again", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClient()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL, strings.NewReader(`{"hello":"world"}`))
+	if err != nil {
+		t.Fatalf("NewRequestWithContext returned error: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
 	}
 }
 
