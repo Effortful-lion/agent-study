@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClientStreamJSONReadsSSEEvents(t *testing.T) {
@@ -65,5 +66,83 @@ func TestClientStreamJSONReadsSSEEvents(t *testing.T) {
 	}
 	if events[2] != "[DONE]" {
 		t.Fatalf("third event = %q", events[2])
+	}
+}
+
+func TestNewClientUsesTransportTimeoutsWithoutGlobalClientTimeout(t *testing.T) {
+	client := NewClient("https://example.com")
+
+	if client.httpClient.Timeout != 0 {
+		t.Fatalf("http client timeout = %s, want no global timeout", client.httpClient.Timeout)
+	}
+
+	tr, ok := client.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport = %T, want *http.Transport", client.httpClient.Transport)
+	}
+	if tr.MaxIdleConns == 0 {
+		t.Fatal("MaxIdleConns = 0, want configured connection pool")
+	}
+	if tr.MaxIdleConnsPerHost == 0 {
+		t.Fatal("MaxIdleConnsPerHost = 0, want configured per-host pool")
+	}
+	if tr.IdleConnTimeout == 0 {
+		t.Fatal("IdleConnTimeout = 0, want configured idle timeout")
+	}
+	if tr.TLSHandshakeTimeout == 0 {
+		t.Fatal("TLSHandshakeTimeout = 0, want configured TLS handshake timeout")
+	}
+}
+
+func TestClientPostJSONRetriesServerErrors(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			http.Error(w, "try again", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	if err := client.PostJSON(context.Background(), "/chat/completions", nil, map[string]string{"hello": "world"}, &out); err != nil {
+		t.Fatalf("PostJSON returned error: %v", err)
+	}
+
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+	if !out.OK {
+		t.Fatal("out.OK = false, want true")
+	}
+}
+
+func TestClientPostJSONStopsWhenContextIsCanceled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	var out struct{}
+	err := client.PostJSON(ctx, "/chat/completions", nil, map[string]string{"hello": "world"}, &out)
+	if err == nil {
+		t.Fatal("PostJSON returned nil error, want context timeout")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("ctx.Err() = nil, want context timeout")
 	}
 }
