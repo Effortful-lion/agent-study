@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -56,7 +59,7 @@ func (r *Router) Chat(ctx context.Context, question string) (*RouteResult, error
 		return nil, errors.New("router has no services")
 	}
 
-	var errs []error
+	var errs []routeError
 	for _, service := range SelectStrategy(r.strategy, r.services) {
 		resp, err := service.Provider.Chat(ctx, service.Config, question)
 		if err == nil {
@@ -65,12 +68,12 @@ func (r *Router) Chat(ctx context.Context, question string) (*RouteResult, error
 				Model:      service.Config.Model,
 				Response:   resp,
 				Cost:       estimateCost(service.Config, resp),
-				LastErrors: errs,
+				LastErrors: routeErrorsAsErrors(errs),
 				Latency:    recordSnapshot(),
 			}, nil
 		}
 
-		errs = append(errs, fmt.Errorf("%s: %w", service.Provider.Name(), err))
+		errs = append(errs, routeError{Service: service, Err: err})
 		if ctx.Err() != nil {
 			recordSnapshot()
 			return nil, ctx.Err()
@@ -78,7 +81,7 @@ func (r *Router) Chat(ctx context.Context, question string) (*RouteResult, error
 	}
 
 	recordSnapshot()
-	return nil, fmt.Errorf("all providers failed: %s", joinErrors(errs))
+	return nil, fmt.Errorf("all providers failed:\n%s", formatRouteErrors(errs))
 }
 
 func (r *Router) ChatStream(ctx context.Context, question string) (<-chan RouteStreamChunk, error) {
@@ -104,11 +107,11 @@ func (r *Router) ChatStream(ctx context.Context, question string) (<-chan RouteS
 		}()
 		defer close(out)
 
-		var errs []error
+		var errs []routeError
 		for _, service := range SelectStrategy(r.strategy, r.services) {
 			stream, err := service.Provider.ChatStream(ctx, service.Config, question)
 			if err != nil {
-				errs = append(errs, fmt.Errorf("%s: %w", service.Provider.Name(), err))
+				errs = append(errs, routeError{Service: service, Err: err})
 				if ctx.Err() != nil {
 					sendRouteStreamErr(ctx, out, ctx.Err())
 					return
@@ -120,12 +123,11 @@ func (r *Router) ChatStream(ctx context.Context, question string) (<-chan RouteS
 			hasContent := false
 			for chunk := range stream {
 				if chunk.Err != nil {
-					wrapped := fmt.Errorf("%s: %w", service.Provider.Name(), chunk.Err)
 					if !hasContent {
-						errs = append(errs, wrapped)
+						errs = append(errs, routeError{Service: service, Err: chunk.Err})
 						break
 					}
-					sendRouteStreamErr(ctx, out, wrapped)
+					sendRouteStreamErr(ctx, out, fmt.Errorf("%s: %w", service.Provider.Name(), chunk.Err))
 					return
 				}
 				if chunk.Content == "" {
@@ -151,7 +153,7 @@ func (r *Router) ChatStream(ctx context.Context, question string) (<-chan RouteS
 					Done:       true,
 					Response:   resp,
 					Cost:       estimateCost(service.Config, resp),
-					LastErrors: errs,
+					LastErrors: routeErrorsAsErrors(errs),
 					Latency:    recordSnapshot(),
 				}) {
 					return
@@ -160,7 +162,7 @@ func (r *Router) ChatStream(ctx context.Context, question string) (<-chan RouteS
 			}
 		}
 
-		sendRouteStreamErr(ctx, out, fmt.Errorf("all providers failed: %s", joinErrors(errs)))
+		sendRouteStreamErr(ctx, out, fmt.Errorf("all providers failed:\n%s", formatRouteErrors(errs)))
 	}()
 
 	return out, nil
@@ -214,11 +216,72 @@ func sendRouteStreamErr(ctx context.Context, out chan<- RouteStreamChunk, err er
 	sendRouteStreamChunk(ctx, out, RouteStreamChunk{Err: err})
 }
 
+type routeError struct {
+	Service LLMService
+	Err     error
+}
+
 // 合并 error
-func joinErrors(errs []error) string {
+func formatRouteErrors(errs []routeError) string {
 	parts := make([]string, 0, len(errs))
 	for _, err := range errs {
-		parts = append(parts, err.Error())
+		category, suggestion := diagnoseError(err.Err)
+		parts = append(parts, fmt.Sprintf(
+			"- provider=%s model=%s base_url=%s category=%s error=%q 建议: %s",
+			err.Service.Provider.Name(),
+			err.Service.Config.Model,
+			err.Service.Config.BaseURL,
+			category,
+			err.Err.Error(),
+			suggestion,
+		))
 	}
-	return strings.Join(parts, "; ")
+	return strings.Join(parts, "\n")
+}
+
+func routeErrorsAsErrors(errs []routeError) []error {
+	out := make([]error, 0, len(errs))
+	for _, err := range errs {
+		out = append(out, fmt.Errorf("%s: %w", err.Service.Provider.Name(), err.Err))
+	}
+	return out
+}
+
+func diagnoseError(err error) (string, string) {
+	if err == nil {
+		return "unknown", "查看 provider 配置和上游服务日志"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout", "检查请求超时、网络连通性、代理配置和服务商状态"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled", "请求已被取消，检查是否按下 Ctrl+C 或上游 context 被取消"
+	}
+	if errors.Is(err, io.EOF) || strings.Contains(strings.ToLower(err.Error()), "eof") {
+		return "connection_closed", "检查网络、代理、网关地址；远端可能在返回 HTTP 响应前关闭了连接"
+	}
+
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		var netErr net.Error
+		if errors.As(urlErr, &netErr) && netErr.Timeout() {
+			return "timeout", "检查请求超时、网络连通性、代理配置和服务商状态"
+		}
+		return "network", "检查 base_url 是否正确、DNS/代理是否可用、目标服务是否可访问"
+	}
+
+	if strings.Contains(err.Error(), "status=401") || strings.Contains(err.Error(), "status=403") {
+		return "auth", "检查 API Key 是否正确、是否有模型权限"
+	}
+	if strings.Contains(err.Error(), "status=404") {
+		return "not_found", "检查 base_url、接口路径和模型名称是否正确"
+	}
+	if strings.Contains(err.Error(), "status=429") {
+		return "rate_limited", "检查限流、额度和并发请求数量"
+	}
+	if strings.Contains(err.Error(), "status=5") {
+		return "provider_5xx", "服务商返回 5xx，稍后重试或切换 provider"
+	}
+
+	return "unknown", "查看原始错误、provider 配置和上游服务状态"
 }
