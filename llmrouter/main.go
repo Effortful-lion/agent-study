@@ -31,12 +31,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := LoadDotEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	services, err := BuildAll()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	router := NewRouter(services)
+	router := NewRouter(services, ReadStrategyFromEnv())
 	PrintRouterChatStream(ctx, router, question)
 }

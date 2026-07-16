@@ -9,6 +9,7 @@ import (
 
 type Router struct {
 	services []LLMService
+	strategy Strategy
 }
 
 type RouteResult struct {
@@ -30,8 +31,11 @@ type RouteStreamChunk struct {
 	LastErrors []error
 }
 
-func NewRouter(services []LLMService) *Router {
-	return &Router{services: services}
+func NewRouter(services []LLMService, strategy Strategy) *Router {
+	return &Router{
+		services: services,
+		strategy: strategy,
+	}
 }
 
 func (r *Router) Chat(ctx context.Context, question string) (*RouteResult, error) {
@@ -40,7 +44,7 @@ func (r *Router) Chat(ctx context.Context, question string) (*RouteResult, error
 	}
 
 	var errs []error
-	for _, service := range r.services {
+	for _, service := range SelectStrategy(r.strategy, r.services) {
 		resp, err := service.Provider.Chat(ctx, service.Config, question)
 		if err == nil {
 			return &RouteResult{
@@ -71,7 +75,7 @@ func (r *Router) ChatStream(ctx context.Context, question string) (<-chan RouteS
 		defer close(out)
 
 		var errs []error
-		for _, service := range r.services {
+		for _, service := range SelectStrategy(r.strategy, r.services) {
 			stream, err := service.Provider.ChatStream(ctx, service.Config, question)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", service.Provider.Name(), err))
