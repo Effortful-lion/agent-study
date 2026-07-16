@@ -37,10 +37,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	service := services[0]
-
-	// 非流式
-	// service.Provider.PrintChat(ctx, service.Config, question)
-	// 流式
-	service.Provider.PrintChatStream(ctx, service.Config, question)
+	router := NewRouter(services)
+	PrintRouterChatStream(ctx, router, question)
 }

@@ -15,7 +15,7 @@ import (
 //=================================适配 OpenAI 风格=================================
 
 // 非流式调用
-func GPTChat(ctx context.Context, cfg LLMConfig, question string) error {
+func GPTChat(ctx context.Context, cfg LLMConfig, question string) (*ChatResponse, error) {
 	// body
 	chatReq := ChatRequest{
 		Model: cfg.Model,
@@ -25,11 +25,14 @@ func GPTChat(ctx context.Context, cfg LLMConfig, question string) error {
 		Stream: false,
 	}
 	body, err := json.Marshal(chatReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
 
 	// req
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("new request: %w", err)
+		return nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -39,19 +42,22 @@ func GPTChat(ctx context.Context, cfg LLMConfig, question string) error {
 	client := NewClient()
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("do request: %w", err)
+		return nil, fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("chat failed: status=%d body=%s", resp.StatusCode, string(b))
+	}
 
 	// 解析 resp
 	chatResp, err := parseResp(resp)
 	if err != nil {
-		return fmt.Errorf("parse response: %w", err)
+		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	// 输出 resp
-	fmt.Println(chatResp.Content)
-	return nil
+	return chatResp, nil
 }
 
 // 流式调用
@@ -174,7 +180,7 @@ func parseResp(resp *http.Response) (*ChatResponse, error) {
 
 //=================================适配 claude 风格=================================
 
-func ClaudeChat(ctx context.Context, cfg LLMConfig, question string) error {
+func ClaudeChat(ctx context.Context, cfg LLMConfig, question string) (*ChatResponse, error) {
 	chatReq := ChatRequest{
 		Model: cfg.Model,
 		Messages: []Message{
@@ -184,12 +190,12 @@ func ClaudeChat(ctx context.Context, cfg LLMConfig, question string) error {
 	}
 	body, err := json.Marshal(chatReq)
 	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("new request: %w", err)
+		return nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -198,9 +204,14 @@ func ClaudeChat(ctx context.Context, cfg LLMConfig, question string) error {
 	client := NewClient()
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("do request: %w", err)
+		return nil, fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("chat failed: status=%d body=%s", resp.StatusCode, string(b))
+	}
 
 	var raw struct {
 		Content []struct {
@@ -212,15 +223,18 @@ func ClaudeChat(ctx context.Context, cfg LLMConfig, question string) error {
 		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return fmt.Errorf("parse response: %w", err)
+		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
 	var content string
 	for _, c := range raw.Content {
 		content += c.Text
 	}
-	fmt.Println(content)
-	return nil
+	return &ChatResponse{
+		Content:      content,
+		InputTokens:  raw.Usage.InputTokens,
+		OutputTokens: raw.Usage.OutputTokens,
+	}, nil
 }
 
 func ClaudeChatStream(ctx context.Context, cfg LLMConfig, question string) (<-chan StreamChunk, error) {

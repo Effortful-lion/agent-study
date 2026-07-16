@@ -2,21 +2,17 @@ package main
 
 import "context"
 
-type DeepSeek struct {
-	baseProvider
-}
+type DeepSeek struct{}
 
 func NewDeepSeek() *DeepSeek {
-	d := &DeepSeek{}
-	d.baseProvider.Provider = d
-	return d
+	return &DeepSeek{}
 }
 
 func (d *DeepSeek) Name() string {
 	return "deepseek"
 }
 
-func (d *DeepSeek) Chat(ctx context.Context, cfg LLMConfig, question string) error {
+func (d *DeepSeek) Chat(ctx context.Context, cfg LLMConfig, question string) (*ChatResponse, error) {
 	return GPTChat(ctx, cfg, question)
 }
 

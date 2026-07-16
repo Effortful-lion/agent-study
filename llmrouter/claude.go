@@ -2,21 +2,17 @@ package main
 
 import "context"
 
-type Claude struct {
-	baseProvider
-}
+type Claude struct{}
 
 func NewClaude() *Claude {
-	c := &Claude{}
-	c.baseProvider.Provider = c
-	return c
+	return &Claude{}
 }
 
 func (c *Claude) Name() string {
 	return "claude"
 }
 
-func (c *Claude) Chat(ctx context.Context, cfg LLMConfig, question string) error {
+func (c *Claude) Chat(ctx context.Context, cfg LLMConfig, question string) (*ChatResponse, error) {
 	return ClaudeChat(ctx, cfg, question)
 }
 
