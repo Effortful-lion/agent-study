@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/Effortful-lion/agent-study/minicall/internal/llm"
-	"github.com/Effortful-lion/agent-study/minicall/internal/transport"
+	"github.com/Effortful-lion/agent-study/minicall-tansuo/internal/llm"
+	"github.com/Effortful-lion/agent-study/minicall-tansuo/internal/transport"
 )
 
 type Config struct {

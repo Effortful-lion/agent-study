@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Effortful-lion/agent-study/minicall/internal/llm"
-	"github.com/Effortful-lion/agent-study/minicall/pkg/stream"
+	"github.com/Effortful-lion/agent-study/minicall-tansuo/internal/llm"
+	"github.com/Effortful-lion/agent-study/minicall-tansuo/pkg/stream"
 )
 
 func TestChatModelImplementsProviderChat(t *testing.T) {
