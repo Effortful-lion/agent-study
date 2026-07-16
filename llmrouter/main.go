@@ -43,7 +43,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO 用 signal.NotifyContext 贯穿取消, 分别调用非流式和流式
 	//err = Chat(ctx, cfg, question)
 	//if err != nil {
 	//	fmt.Fprintln(os.Stderr, err)
