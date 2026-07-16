@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type Router struct {
 	services []LLMService
 	strategy Strategy
+	metrics  *LatencyMetrics
 }
 
 type RouteResult struct {
@@ -18,6 +20,7 @@ type RouteResult struct {
 	Response   *ChatResponse
 	Cost       float64
 	LastErrors []error
+	Latency    LatencySnapshot
 }
 
 type RouteStreamChunk struct {
@@ -29,17 +32,27 @@ type RouteStreamChunk struct {
 	Response   *ChatResponse
 	Cost       float64
 	LastErrors []error
+	Latency    LatencySnapshot
 }
 
 func NewRouter(services []LLMService, strategy Strategy) *Router {
 	return &Router{
 		services: services,
 		strategy: strategy,
+		metrics:  NewLatencyMetrics(),
 	}
 }
 
 func (r *Router) Chat(ctx context.Context, question string) (*RouteResult, error) {
+	start := time.Now()
+	// 定义时间记录器，需要退出前调用
+	recordSnapshot := func() LatencySnapshot {
+		r.metrics.Record(time.Since(start))
+		return r.metrics.Snapshot()
+	}
+
 	if len(r.services) == 0 {
+		recordSnapshot()
 		return nil, errors.New("router has no services")
 	}
 
@@ -53,15 +66,18 @@ func (r *Router) Chat(ctx context.Context, question string) (*RouteResult, error
 				Response:   resp,
 				Cost:       estimateCost(service.Config, resp),
 				LastErrors: errs,
+				Latency:    recordSnapshot(),
 			}, nil
 		}
 
 		errs = append(errs, fmt.Errorf("%s: %w", service.Provider.Name(), err))
 		if ctx.Err() != nil {
+			recordSnapshot()
 			return nil, ctx.Err()
 		}
 	}
 
+	recordSnapshot()
 	return nil, fmt.Errorf("all providers failed: %s", joinErrors(errs))
 }
 
@@ -72,6 +88,20 @@ func (r *Router) ChatStream(ctx context.Context, question string) (<-chan RouteS
 
 	out := make(chan RouteStreamChunk)
 	go func() {
+		start := time.Now()
+		recorded := false
+		recordSnapshot := func() LatencySnapshot {
+			if !recorded {
+				r.metrics.Record(time.Since(start))
+				recorded = true
+			}
+			return r.metrics.Snapshot()
+		}
+		defer func() {
+			if !recorded {
+				r.metrics.Record(time.Since(start))
+			}
+		}()
 		defer close(out)
 
 		var errs []error
@@ -122,6 +152,7 @@ func (r *Router) ChatStream(ctx context.Context, question string) (<-chan RouteS
 					Response:   resp,
 					Cost:       estimateCost(service.Config, resp),
 					LastErrors: errs,
+					Latency:    recordSnapshot(),
 				}) {
 					return
 				}
