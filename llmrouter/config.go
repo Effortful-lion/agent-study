@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -62,25 +61,6 @@ var supportedProviders = []providerEnv{
 		InputPrice:     3.00,
 		OutputPrice:    15.00,
 	},
-}
-
-// 读取 LLM_BASE_URL、LLM_API_KEY、LLM_MODEL
-func loadConfigFromEnv() (LLMConfig, error) {
-	cfg := LLMConfig{
-		BaseURL: strings.TrimRight(os.Getenv("LLM_BASE_URL"), "/"),
-		APIKey:  os.Getenv("LLM_API_KEY"),
-		Model:   os.Getenv("LLM_MODEL"),
-	}
-	if cfg.BaseURL == "" {
-		return cfg, errors.New("请设置 LLM_BASE_URL，例如: export LLM_BASE_URL=https://api.deepseek.com")
-	}
-	if cfg.APIKey == "" {
-		return cfg, errors.New("请设置 LLM_API_KEY，例如: export LLM_API_KEY=sk-xxx")
-	}
-	if cfg.Model == "" {
-		return cfg, errors.New("请设置 LLM_MODEL，例如: export LLM_MODEL=deepseek-chat")
-	}
-	return cfg, nil
 }
 
 // BuildAll 通过环境变量批量初始化已配置的模型服务商。
