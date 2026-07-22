@@ -2,11 +2,13 @@ package llmlib
 
 import "context"
 
+// StreamChunk 表示流式响应的一个数据块
 type StreamChunk struct {
-	Content string
-	Err     error
+	Content string // 内容片段
+	Err     error  // 错误信息，如果有
 }
 
+// Process 处理一个 channel 中的所有元素，直到 channel 关闭或出错
 func Process[T any](
 	ctx context.Context,
 	ch <-chan T,
@@ -27,6 +29,7 @@ func Process[T any](
 	}
 }
 
+// Collect 将 channel 中的所有元素收集到一个切片中
 func Collect[T any](ctx context.Context, ch <-chan T) ([]T, error) {
 	var result []T
 	err := Process(ctx, ch, func(item T) error {

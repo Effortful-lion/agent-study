@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// parseOpenAIDelta 解析 OpenAI 风格的 SSE delta 数据
 func parseOpenAIDelta(data []byte) (delta string, done bool, err error) {
 	if string(data) == "[DONE]" {
 		return "", true, nil
