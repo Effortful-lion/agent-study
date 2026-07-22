@@ -1,3 +1,7 @@
+// 文件职责：
+// - 实现 OpenAI 兼容协议的同步和流式聊天调用。
+// - 供 OpenAI 及兼容该协议的多家服务商共享复用。
+
 package llmlib
 
 import (
@@ -10,8 +14,7 @@ import (
 	"net/http"
 )
 
-// OpenAI 风格协议实现，可被 DeepSeek、Doubao、OpenAI、Kimi、Tongyi 等任何 OpenAI 兼容 API 复用
-
+// OpenAIChat 使用 OpenAI 兼容聊天接口发起同步请求，并把响应解析为统一结构。
 func OpenAIChat(ctx context.Context, cfg LLMConfig, messages []Message) (*ChatResponse, error) {
 	chatReq := ChatRequest{
 		Model:    cfg.Model,
@@ -23,6 +26,7 @@ func OpenAIChat(ctx context.Context, cfg LLMConfig, messages []Message) (*ChatRe
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
+	// 将统一请求结构写入 OpenAI 兼容的 /chat/completions 接口。
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
@@ -43,6 +47,7 @@ func OpenAIChat(ctx context.Context, cfg LLMConfig, messages []Message) (*ChatRe
 		return nil, fmt.Errorf("chat failed: status=%d body=%s", resp.StatusCode, string(b))
 	}
 
+	// 只提取首个 choice 文本和 usage 信息，其余字段保持由上游自行扩展。
 	var raw struct {
 		Choices []struct {
 			Message Message `json:"message"`
@@ -66,6 +71,7 @@ func OpenAIChat(ctx context.Context, cfg LLMConfig, messages []Message) (*ChatRe
 	}, nil
 }
 
+// OpenAIChatStream 使用 OpenAI 兼容流接口发起请求，并把 SSE 事件转换为统一流式片段。
 func OpenAIChatStream(ctx context.Context, cfg LLMConfig, messages []Message) (<-chan StreamChunk, error) {
 	stream := make(chan StreamChunk)
 
@@ -93,6 +99,7 @@ func OpenAIChatStream(ctx context.Context, cfg LLMConfig, messages []Message) (<
 	go func() {
 		defer close(stream)
 
+		// 在独立 goroutine 中持续读取上游流，避免阻塞调用方。
 		client := NewClient()
 		resp, err := client.Do(req)
 		if err != nil {
@@ -110,6 +117,7 @@ func OpenAIChatStream(ctx context.Context, cfg LLMConfig, messages []Message) (<
 		}
 
 		if err := ParseSSE(resp.Body, func(data []byte) error {
+			// 把每个 data 事件提取为文本增量，遇到完成标记时主动结束读取。
 			delta, done, err := parseOpenAIDelta(data)
 			if err != nil {
 				return err

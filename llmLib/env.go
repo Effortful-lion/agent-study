@@ -1,3 +1,7 @@
+// 文件职责：
+// - 从 .env 和进程环境变量装配多个服务商配置。
+// - 负责解析启用顺序、默认模型、价格和延迟信息，并生成可路由的服务列表。
+
 package llmlib
 
 import (
@@ -8,19 +12,20 @@ import (
 	"strings"
 )
 
-// providerMeta 服务商元信息，包含环境变量名、默认值、价格、延迟等
+// providerMeta 描述单个服务商在环境变量装配阶段需要的元信息。
 type providerMeta struct {
-	Name           string
-	APIKeyEnv      string
-	BaseURLEnv     string
-	ModelEnv       string
-	DefaultBaseURL string
-	DefaultModel   string
-	InputPrice     float64
-	OutputPrice    float64
-	LatencyMS      int
+	Name           string  // 服务商名称，最终用于创建 Provider 实例。
+	APIKeyEnv      string  // API Key 对应的环境变量名。
+	BaseURLEnv     string  // BaseURL 对应的环境变量名，未设置时回退默认值。
+	ModelEnv       string  // 模型名称对应的环境变量名，未设置时回退默认值。
+	DefaultBaseURL string  // 默认接口地址，用于未显式覆盖的情况。
+	DefaultModel   string  // 默认模型名称，用于快速启用 provider。
+	InputPrice     float64 // 每百万输入 token 价格，供路由成本估算。
+	OutputPrice    float64 // 每百万输出 token 价格，供路由成本估算。
+	LatencyMS      int     // 预估延迟毫秒值，供延迟策略排序。
 }
 
+// providerMetas 维护内置支持的服务商及其环境变量映射关系。
 var providerMetas = []providerMeta{
 	{
 		Name:           "doubao",
@@ -101,10 +106,12 @@ var providerMetas = []providerMeta{
 	},
 }
 
+// LoadDotEnv 从当前目录的 .env 文件加载环境变量，供本地开发快速启动。
 func LoadDotEnv() error {
 	return LoadDotEnvFromPath(".env")
 }
 
+// LoadDotEnvFromPath 读取指定 .env 文件，并只在变量尚未存在时注入进程环境。
 func LoadDotEnvFromPath(path string) error {
 	file, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -130,16 +137,19 @@ func LoadDotEnvFromPath(path string) error {
 		key = strings.TrimSpace(key)
 		value = strings.Trim(strings.TrimSpace(value), `"'`)
 		if key != "" && os.Getenv(key) == "" {
+			// 保留已有环境变量优先级，避免 .env 覆盖外部注入的配置。
 			os.Setenv(key, value)
 		}
 	}
 	return scanner.Err()
 }
 
+// LoadAll 按默认 .env 路径加载所有已配置服务商。
 func LoadAll() ([]LLMService, error) {
 	return LoadAllWithEnv("")
 }
 
+// LoadAllWithEnv 读取环境变量并生成可用于 Router 的服务列表。
 func LoadAllWithEnv(envPath string) ([]LLMService, error) {
 	if envPath != "" {
 		if err := LoadDotEnvFromPath(envPath); err != nil {
@@ -158,6 +168,7 @@ func LoadAllWithEnv(envPath string) ([]LLMService, error) {
 	var configuredProviders []string
 
 	for _, name := range providerNames {
+		// 先校验 provider 是否为内置支持项，再尝试装配环境变量。
 		meta, ok := findProviderMeta(name)
 		if !ok {
 			return nil, fmt.Errorf("unknown provider: %s\n\n%s", name, ProviderConfigHelp())
@@ -197,7 +208,7 @@ func LoadAllWithEnv(envPath string) ([]LLMService, error) {
 	return services, nil
 }
 
-// loadProviderNames 从环境变量 LLM_PROVIDERS 加载服务商名称列表
+// loadProviderNames 从 LLM_PROVIDERS 解析服务商顺序，未设置时返回全部内置服务商。
 func loadProviderNames() []string {
 	raw := os.Getenv("LLM_PROVIDERS")
 	if raw == "" {
@@ -219,7 +230,7 @@ func loadProviderNames() []string {
 	return names
 }
 
-// findProviderMeta 根据名称查找服务商元信息
+// findProviderMeta 根据 provider 名称查找对应的环境变量元信息。
 func findProviderMeta(name string) (providerMeta, bool) {
 	for _, provider := range providerMetas {
 		if provider.Name == name {
@@ -229,7 +240,7 @@ func findProviderMeta(name string) (providerMeta, bool) {
 	return providerMeta{}, false
 }
 
-// loadProviderConfig 从环境变量加载单个服务商配置
+// loadProviderConfig 从环境变量装配单个服务商配置，缺少 API Key 时返回未启用。
 func loadProviderConfig(provider providerMeta) (LLMConfig, bool) {
 	apiKey := strings.TrimSpace(os.Getenv(provider.APIKeyEnv))
 	if apiKey == "" {
@@ -256,7 +267,7 @@ func loadProviderConfig(provider providerMeta) (LLMConfig, bool) {
 	}, true
 }
 
-// loadLatencyMS 加载延迟配置（支持环境变量覆盖默认值）
+// loadLatencyMS 读取服务商延迟配置，支持通过环境变量覆盖默认值。
 func loadLatencyMS(provider providerMeta) int {
 	raw := strings.TrimSpace(os.Getenv(strings.ToUpper(provider.Name) + "_LATENCY_MS"))
 	if raw == "" {
@@ -270,6 +281,7 @@ func loadLatencyMS(provider providerMeta) int {
 	return latency
 }
 
+// ProviderConfigHelp 返回环境变量配置说明，供错误提示和文档展示场景复用。
 func ProviderConfigHelp() string {
 	var b strings.Builder
 	b.WriteString("支持的 providers: ")
@@ -310,6 +322,7 @@ func ProviderConfigHelp() string {
 	return b.String()
 }
 
+// ReadStrategyFromEnv 从环境变量读取路由策略，未命中时回退默认策略。
 func ReadStrategyFromEnv() Strategy {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv("LLM_ROUTING_STRATEGY")))
 	raw = strings.ReplaceAll(raw, "_", "")

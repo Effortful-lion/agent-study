@@ -1,17 +1,8 @@
-// Package llmlib 是一个 LLM 开发的标准库，提供统一的接口来调用各种 AI 服务商的 API。
-//
-// 主要特性:
-//   - 支持多种 AI 服务商: OpenAI、DeepSeek、Doubao、Claude、Zhipu、Tongyi、Kimi
-//   - 提供同步和流式两种调用方式
-//   - 统一的消息格式和响应结构
-//   - 支持自定义 HTTP 客户端配置
-//   - 内置 token 估算功能
-//
-// 快速开始:
-//
-//	resp, err := llmlib.Chat(ctx, "deepseek", apiKey, []llmlib.Message{
-//	    llmlib.NewUserMessage("你好"),
-//	}, llmlib.WithModel("deepseek-chat"))
+// 文件职责：
+// - 暴露 llmlib 的主调用入口，负责按服务商名称组装配置并分发请求。
+// - 主要包含同步调用、流式调用、默认地址选择和常用消息构造器。
+// - 供业务侧以统一接口访问不同模型服务商。
+
 package llmlib
 
 import (
@@ -19,18 +10,9 @@ import (
 	"fmt"
 )
 
-// Chat 发送同步聊天请求到指定的 AI 服务商
-// providerName: 服务商名称，支持 "openai"、"deepseek"、"doubao"、"claude"、"zhipu"、"tongyi"、"kimi"
-// apiKey: API 密钥
-// messages: 消息列表
-// opts: 可选配置项，如 WithModel、WithBaseURL
-//
-// 示例:
-//
-//	resp, err := llmlib.Chat(ctx, "deepseek", apiKey, []llmlib.Message{
-//	    llmlib.NewUserMessage("你好"),
-//	}, llmlib.WithModel("deepseek-chat"))
+// Chat 按服务商名称发起一次同步聊天调用，并返回统一响应结构。
 func Chat(ctx context.Context, providerName string, apiKey string, messages []Message, opts ...ChatOption) (*ChatResponse, error) {
+	// 先解析服务商实现，避免配置装配完成后才发现 provider 不存在。
 	p, err := NewProvider(providerName)
 	if err != nil {
 		return nil, fmt.Errorf("chat: %w", err)
@@ -43,6 +25,7 @@ func Chat(ctx context.Context, providerName string, apiKey string, messages []Me
 		opt(&cfg)
 	}
 
+	// 调用方未显式指定地址时，回退到服务商的默认入口。
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = getDefaultBaseURL(providerName)
 	}
@@ -50,20 +33,7 @@ func Chat(ctx context.Context, providerName string, apiKey string, messages []Me
 	return p.Chat(ctx, cfg, messages)
 }
 
-// ChatStream 发送流式聊天请求到指定的 AI 服务商
-// 返回一个 channel，用于接收流式响应数据
-//
-// 示例:
-//
-//	stream, err := llmlib.ChatStream(ctx, "deepseek", apiKey, []llmlib.Message{
-//	    llmlib.NewUserMessage("你好"),
-//	}, llmlib.WithModel("deepseek-chat"))
-//	for chunk := range stream {
-//	    if chunk.Err != nil {
-//	        return err
-//	    }
-//	    fmt.Print(chunk.Content)
-//	}
+// ChatStream 按服务商名称发起流式聊天调用，并返回统一的流式输出通道。
 func ChatStream(ctx context.Context, providerName string, apiKey string, messages []Message, opts ...ChatOption) (<-chan StreamChunk, error) {
 	p, err := NewProvider(providerName)
 	if err != nil {
@@ -77,6 +47,7 @@ func ChatStream(ctx context.Context, providerName string, apiKey string, message
 		opt(&cfg)
 	}
 
+	// 流式调用和同步调用共用同一套默认地址装配逻辑。
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = getDefaultBaseURL(providerName)
 	}
@@ -84,7 +55,7 @@ func ChatStream(ctx context.Context, providerName string, apiKey string, message
 	return p.ChatStream(ctx, cfg, messages)
 }
 
-// getDefaultBaseURL 根据服务商名称获取默认 BaseURL
+// getDefaultBaseURL 根据服务商名称返回内置默认接口地址。
 func getDefaultBaseURL(providerName string) string {
 	switch providerName {
 	case "openai":
@@ -106,7 +77,7 @@ func getDefaultBaseURL(providerName string) string {
 	}
 }
 
-// NewMessage 创建一条消息
+// NewMessage 构造一条带角色的消息，供调用方快速组装上下文。
 func NewMessage(role Role, content string) Message {
 	return Message{
 		Role:    role,
@@ -114,17 +85,17 @@ func NewMessage(role Role, content string) Message {
 	}
 }
 
-// NewUserMessage 创建一条用户消息
+// NewUserMessage 构造用户输入消息。
 func NewUserMessage(content string) Message {
 	return NewMessage(User, content)
 }
 
-// NewSystemMessage 创建一条系统消息
+// NewSystemMessage 构造系统提示消息。
 func NewSystemMessage(content string) Message {
 	return NewMessage(System, content)
 }
 
-// NewAssistantMessage 创建一条助手消息
+// NewAssistantMessage 构造助手历史回复消息。
 func NewAssistantMessage(content string) Message {
 	return NewMessage(Assistant, content)
 }

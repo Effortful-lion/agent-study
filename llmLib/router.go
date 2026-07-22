@@ -1,3 +1,7 @@
+// 文件职责：
+// - 提供多服务商路由、失败切换、策略排序和延迟统计能力。
+// - 负责在多个已配置 provider 之间选择调用顺序，并汇总最终结果与诊断信息。
+
 package llmlib
 
 import (
@@ -14,46 +18,52 @@ import (
 	"time"
 )
 
+// Strategy 表示 Router 选择服务商尝试顺序时使用的调度策略。
 type Strategy string
 
 const (
-	StrategyDefault       Strategy = "default"
-	StrategyCheapestFirst Strategy = "cheapest_first"
-	StrategyLowestLatency Strategy = "lowest_latency"
+	StrategyDefault       Strategy = "default"        // 默认策略，按服务列表原始顺序依次尝试。
+	StrategyCheapestFirst Strategy = "cheapest_first" // 成本优先策略，按静态价格从低到高排序。
+	StrategyLowestLatency Strategy = "lowest_latency" // 延迟优先策略，按静态延迟从低到高排序。
 )
 
+// LLMService 绑定一个 provider 实现及其对应配置，作为 Router 的候选节点。
 type LLMService struct {
-	Provider Provider
-	Config   LLMConfig
+	Provider Provider  // 服务商实现，负责真正发起请求。
+	Config   LLMConfig // 当前服务商的模型、价格和连接配置。
 }
 
+// RouteResult 表示同步路由调用的最终结果，以及前序失败节点的信息。
 type RouteResult struct {
-	Provider   string
-	Model      string
-	Response   *ChatResponse
-	Cost       float64
-	LastErrors []error
-	Latency    LatencySnapshot
+	Provider   string          // 实际成功返回结果的服务商名称。
+	Model      string          // 实际使用的模型名称，来自命中的服务配置。
+	Response   *ChatResponse   // 模型返回的统一响应数据。
+	Cost       float64         // 按静态单价和 token 用量估算的调用成本。
+	LastErrors []error         // 在命中成功前失败过的服务错误列表。
+	Latency    LatencySnapshot // 当前 Router 累积延迟样本快照。
 }
 
+// RouteStreamChunk 表示流式路由中的单次输出事件，兼容中间文本和最终收尾信息。
 type RouteStreamChunk struct {
-	Provider   string
-	Model      string
-	Content    string
-	Err        error
-	Done       bool
-	Response   *ChatResponse
-	Cost       float64
-	LastErrors []error
-	Latency    LatencySnapshot
+	Provider   string          // 当前输出所属的服务商名称。
+	Model      string          // 当前输出所属的模型名称。
+	Content    string          // 增量文本内容，流式中间事件时非空。
+	Err        error           // 流式过程中的错误事件。
+	Done       bool            // 是否为流式成功结束后的收尾事件。
+	Response   *ChatResponse   // Done 事件携带的完整响应汇总。
+	Cost       float64         // Done 事件对应的估算成本。
+	LastErrors []error         // 成功前失败过的服务错误列表。
+	Latency    LatencySnapshot // Done 事件对应的延迟统计快照。
 }
 
+// Router 维护候选服务列表、调度策略和运行期延迟统计。
 type Router struct {
 	services []LLMService
 	strategy Strategy
 	metrics  *LatencyMetrics
 }
 
+// NewRouter 创建一个可在多个服务商之间切换的路由器实例。
 func NewRouter(services []LLMService, strategy Strategy) *Router {
 	return &Router{
 		services: services,
@@ -62,6 +72,7 @@ func NewRouter(services []LLMService, strategy Strategy) *Router {
 	}
 }
 
+// Chat 按当前策略依次尝试各服务商，直到某个节点成功返回或全部失败。
 func (r *Router) Chat(ctx context.Context, messages []Message) (*RouteResult, error) {
 	start := time.Now()
 	recordSnapshot := func() LatencySnapshot {
@@ -76,6 +87,7 @@ func (r *Router) Chat(ctx context.Context, messages []Message) (*RouteResult, er
 
 	var errs []routeError
 	for _, service := range selectStrategy(r.strategy, r.services) {
+		// 按排序后的顺序逐个尝试 provider，命中成功后立即返回。
 		resp, err := service.Provider.Chat(ctx, service.Config, messages)
 		if err == nil {
 			return &RouteResult{
@@ -90,6 +102,7 @@ func (r *Router) Chat(ctx context.Context, messages []Message) (*RouteResult, er
 
 		errs = append(errs, routeError{Service: service, Err: err})
 		if ctx.Err() != nil {
+			// 上游 context 已取消时优先返回取消错误，不再继续尝试其他 provider。
 			recordSnapshot()
 			return nil, ctx.Err()
 		}
@@ -99,6 +112,7 @@ func (r *Router) Chat(ctx context.Context, messages []Message) (*RouteResult, er
 	return nil, fmt.Errorf("all providers failed:\n%s", formatRouteErrors(errs))
 }
 
+// ChatStream 按当前策略依次尝试流式服务，命中首个有效输出后继续消费至结束。
 func (r *Router) ChatStream(ctx context.Context, messages []Message) (<-chan RouteStreamChunk, error) {
 	if len(r.services) == 0 {
 		return nil, errors.New("router has no services")
@@ -124,6 +138,7 @@ func (r *Router) ChatStream(ctx context.Context, messages []Message) (<-chan Rou
 
 		var errs []routeError
 		for _, service := range selectStrategy(r.strategy, r.services) {
+			// 先尝试建立当前 provider 的流式连接，连接失败则切换到下一个节点。
 			stream, err := service.Provider.ChatStream(ctx, service.Config, messages)
 			if err != nil {
 				errs = append(errs, routeError{Service: service, Err: err})
@@ -138,10 +153,12 @@ func (r *Router) ChatStream(ctx context.Context, messages []Message) (<-chan Rou
 			hasContent := false
 			for chunk := range stream {
 				if chunk.Err != nil {
+					// 尚未产出任何文本时，将其视为当前 provider 建流失败并继续切换。
 					if !hasContent {
 						errs = append(errs, routeError{Service: service, Err: chunk.Err})
 						break
 					}
+					// 已开始向调用方输出内容后不再切换 provider，直接把错误透出。
 					sendRouteStreamErr(ctx, out, fmt.Errorf("%s: %w", service.Provider.Name(), chunk.Err))
 					return
 				}
@@ -151,6 +168,7 @@ func (r *Router) ChatStream(ctx context.Context, messages []Message) (<-chan Rou
 
 				hasContent = true
 				content.WriteString(chunk.Content)
+				// 将上游文本增量原样转发给调用方消费。
 				if !sendRouteStreamChunk(ctx, out, RouteStreamChunk{
 					Provider: service.Provider.Name(),
 					Model:    service.Config.Model,
@@ -192,7 +210,7 @@ func (r *Router) ChatStream(ctx context.Context, messages []Message) (<-chan Rou
 	return out, nil
 }
 
-// estimateCost 根据配置的价格和响应的 token 数估算调用成本
+// estimateCost 根据配置的静态单价和 token 数估算一次调用成本。
 func estimateCost(cfg LLMConfig, resp *ChatResponse) float64 {
 	if resp == nil {
 		return 0
@@ -202,7 +220,7 @@ func estimateCost(cfg LLMConfig, resp *ChatResponse) float64 {
 	return inputCost + outputCost
 }
 
-// selectStrategy 根据策略选择服务顺序
+// selectStrategy 根据策略返回新的服务顺序，避免修改原始切片。
 func selectStrategy(strategy Strategy, services []LLMService) []LLMService {
 	switch strategy {
 	case StrategyCheapestFirst:
@@ -214,12 +232,12 @@ func selectStrategy(strategy Strategy, services []LLMService) []LLMService {
 	}
 }
 
-// strategyDefault 默认策略：保持原顺序
+// strategyDefault 复制原始顺序，作为默认尝试列表。
 func strategyDefault(services []LLMService) []LLMService {
 	return append([]LLMService(nil), services...)
 }
 
-// strategyCheapestFirst 最便宜优先：按价格升序排列
+// strategyCheapestFirst 按输入输出单价总和从低到高排列服务。
 func strategyCheapestFirst(services []LLMService) []LLMService {
 	ordered := strategyDefault(services)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -230,7 +248,7 @@ func strategyCheapestFirst(services []LLMService) []LLMService {
 	return ordered
 }
 
-// strategyLowestLatency 最低延迟优先：按延迟升序排列
+// strategyLowestLatency 按静态延迟指标从低到高排列服务。
 func strategyLowestLatency(services []LLMService) []LLMService {
 	ordered := strategyDefault(services)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -239,7 +257,7 @@ func strategyLowestLatency(services []LLMService) []LLMService {
 	return ordered
 }
 
-// sendRouteStreamChunk 安全发送流式数据块，处理 ctx 取消
+// sendRouteStreamChunk 向下游发送流式事件，并在上下文取消时终止发送。
 func sendRouteStreamChunk(ctx context.Context, out chan<- RouteStreamChunk, chunk RouteStreamChunk) bool {
 	select {
 	case out <- chunk:
@@ -249,18 +267,18 @@ func sendRouteStreamChunk(ctx context.Context, out chan<- RouteStreamChunk, chun
 	}
 }
 
-// sendRouteStreamErr 发送错误到流式通道
+// sendRouteStreamErr 把错误包装为流式事件发送给调用方。
 func sendRouteStreamErr(ctx context.Context, out chan<- RouteStreamChunk, err error) {
 	sendRouteStreamChunk(ctx, out, RouteStreamChunk{Err: err})
 }
 
-// routeError 路由错误，包含服务信息和错误
+// routeError 记录单个服务节点失败时的配置和原始错误。
 type routeError struct {
-	Service LLMService
-	Err     error
+	Service LLMService // 失败的服务节点。
+	Err     error      // 该节点返回的原始错误。
 }
 
-// formatRouteErrors 格式化路由错误信息，包含诊断建议
+// formatRouteErrors 把各 provider 的失败信息和诊断建议拼成多行文本。
 func formatRouteErrors(errs []routeError) string {
 	parts := make([]string, 0, len(errs))
 	for _, err := range errs {
@@ -278,7 +296,7 @@ func formatRouteErrors(errs []routeError) string {
 	return strings.Join(parts, "\n")
 }
 
-// routeErrorsAsErrors 将 routeError 转换为普通 error 切片
+// routeErrorsAsErrors 将内部错误结构转换为对外暴露的 error 列表。
 func routeErrorsAsErrors(errs []routeError) []error {
 	out := make([]error, 0, len(errs))
 	for _, err := range errs {
@@ -287,7 +305,7 @@ func routeErrorsAsErrors(errs []routeError) []error {
 	return out
 }
 
-// diagnoseError 诊断错误类型并给出建议
+// diagnoseError 按常见网络和鉴权场景归类错误，并返回排查建议。
 func diagnoseError(err error) (string, string) {
 	if err == nil {
 		return "unknown", "查看 provider 配置和上游服务日志"
@@ -327,21 +345,25 @@ func diagnoseError(err error) (string, string) {
 	return "unknown", "查看原始错误、provider 配置和上游服务状态"
 }
 
+// LatencySnapshot 表示 Router 当前累计请求延迟的统计快照。
 type LatencySnapshot struct {
-	Samples int           // 总采样次数
-	P50     time.Duration // 50分位延迟（中位数）
-	P95     time.Duration // 95分位延迟
+	Samples int           // 总采样次数，用于表示统计样本规模。
+	P50     time.Duration // 50 分位延迟，即中位数。
+	P95     time.Duration // 95 分位延迟，用于观察尾部慢请求。
 }
 
+// LatencyMetrics 负责线程安全地累积延迟样本并生成分位统计。
 type LatencyMetrics struct {
 	mu      sync.Mutex
 	samples []time.Duration
 }
 
+// NewLatencyMetrics 创建空的延迟统计容器。
 func NewLatencyMetrics() *LatencyMetrics {
 	return &LatencyMetrics{}
 }
 
+// Record 记录一次延迟样本，负值会被直接忽略。
 func (m *LatencyMetrics) Record(latency time.Duration) {
 	if latency < 0 {
 		return
@@ -351,6 +373,7 @@ func (m *LatencyMetrics) Record(latency time.Duration) {
 	m.samples = append(m.samples, latency)
 }
 
+// Snapshot 复制当前样本并计算常用分位值，供路由结果对外展示。
 func (m *LatencyMetrics) Snapshot() LatencySnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -371,7 +394,7 @@ func (m *LatencyMetrics) Snapshot() LatencySnapshot {
 	}
 }
 
-// percentile 计算分位值
+// percentile 在已排序样本中按给定分位点取值。
 func percentile(samples []time.Duration, p float64) time.Duration {
 	index := int(math.Ceil(float64(len(samples))*p)) - 1
 	if index < 0 {
