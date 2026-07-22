@@ -1,3 +1,3 @@
-module github.com/lion/llmlib
+module github.com/Effortful-lion/agent-study/llmLib
 
-go 1.21
+go 1.26.5
