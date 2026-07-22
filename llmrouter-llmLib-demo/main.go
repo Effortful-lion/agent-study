@@ -8,7 +8,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/lion/llmlib"
+	"github.com/Effortful-lion/agent-study/llmLib"
 )
 
 func main() {
