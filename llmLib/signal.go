@@ -1,3 +1,13 @@
 package llmlib
 
-// 用于表示各种操作系统信号，比如：ctrl+C 的信号
+import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+)
+
+// SignalContext 返回一个可被 Ctrl+C / SIGTERM 取消的上下文。
+func SignalContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+}
