@@ -179,7 +179,7 @@ func main() {
 		return
 	}
 
-	registry := llmlib.NewRegistry()
+	registry := llmlib.NewRegistryToolSet()
 	registry.Register(&CalculatorTool{})
 	registry.Register(&TimeTool{})
 

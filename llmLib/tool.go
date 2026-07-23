@@ -15,9 +15,9 @@ import (
 // Tool 接口定义 Agent 可调用的工具，实现此接口即可被 Agent 使用。
 // 工具是 Agent 的感知和行动接口，通过工具调用外部服务和能力。
 type Tool interface {
-	Name() string                     // 工具名称，用于模型识别和调用
-	Description() string              // 工具描述，用于模型理解工具用途
-	Parameters() map[string]string    // 参数描述，key 为参数名，value 为参数类型和说明
+	Name() string                                                               // 工具名称，用于模型识别和调用
+	Description() string                                                        // 工具描述，用于模型理解工具用途
+	Parameters() map[string]string                                              // 参数描述，key 为参数名，value 为参数类型和说明
 	Call(ctx context.Context, args map[string]interface{}) (interface{}, error) // 执行工具调用
 }
 
@@ -27,8 +27,8 @@ type Registry struct {
 	tools map[string]Tool
 }
 
-// NewRegistry 创建一个新的工具注册表。
-func NewRegistry() *Registry {
+// NewRegistryToolSet 创建一个新的工具注册表。
+func NewRegistryToolSet() *Registry {
 	return &Registry{tools: make(map[string]Tool)}
 }
 

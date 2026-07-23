@@ -17,6 +17,27 @@ type ToolCallProvider interface {
 	ChatStreamWithTools(ctx context.Context, cfg LLMConfig, messages []Message, tools []ToolDef) (<-chan StreamChunk, error)
 }
 
+func NewProvider(name string) (Provider, error) {
+	switch name {
+	case ProviderDeepSeek:
+		return NewDeepSeekProvider(), nil
+	case ProviderDoubao:
+		return NewDoubaoProvider(), nil
+	case ProviderClaude:
+		return NewClaudeProvider(), nil
+	case ProviderOpenAI:
+		return NewOpenAIProvider(), nil
+	case ProviderZhipu:
+		return NewZhipuProvider(), nil
+	case ProviderTongyi:
+		return NewTongyiProvider(), nil
+	case ProviderKimi:
+		return NewKimiProvider(), nil
+	default:
+		return nil, fmt.Errorf("unknown provider: %s", name)
+	}
+}
+
 type DeepSeekProvider struct{}
 
 func NewDeepSeekProvider() *DeepSeekProvider {
@@ -197,25 +218,4 @@ func (p *KimiProvider) ChatWithTools(ctx context.Context, cfg LLMConfig, message
 
 func (p *KimiProvider) ChatStreamWithTools(ctx context.Context, cfg LLMConfig, messages []Message, tools []ToolDef) (<-chan StreamChunk, error) {
 	return OpenAIChatStreamWithTools(ctx, cfg, messages, tools)
-}
-
-func NewProvider(name string) (Provider, error) {
-	switch name {
-	case ProviderDeepSeek:
-		return NewDeepSeekProvider(), nil
-	case ProviderDoubao:
-		return NewDoubaoProvider(), nil
-	case ProviderClaude:
-		return NewClaudeProvider(), nil
-	case ProviderOpenAI:
-		return NewOpenAIProvider(), nil
-	case ProviderZhipu:
-		return NewZhipuProvider(), nil
-	case ProviderTongyi:
-		return NewTongyiProvider(), nil
-	case ProviderKimi:
-		return NewKimiProvider(), nil
-	default:
-		return nil, fmt.Errorf("unknown provider: %s", name)
-	}
 }

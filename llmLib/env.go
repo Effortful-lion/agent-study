@@ -346,6 +346,7 @@ func ProviderConfigHelp() string {
 
 // ReadStrategyFromEnv 从环境变量读取路由策略，未命中时回退默认策略。
 func ReadStrategyFromEnv() Strategy {
+	// TODO LLM_ROUTING_STRATEGY 常量化
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv("LLM_ROUTING_STRATEGY")))
 	raw = strings.ReplaceAll(raw, "_", "")
 	raw = strings.ReplaceAll(raw, "-", "")

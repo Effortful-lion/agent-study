@@ -18,6 +18,7 @@ func main() {
 	fmt.Println("  3. Router 会根据策略选择最优 provider")
 	fmt.Println()
 
+	// 加载默认配置 .env
 	services, err := llmlib.LoadAll()
 	if err != nil {
 		fmt.Printf("加载服务失败: %v\n", err)
@@ -32,7 +33,7 @@ func main() {
 	fmt.Printf("已加载 %d 个服务商:\n", len(services))
 	for _, s := range services {
 		fmt.Printf("  - %s (模型: %s, 输入单价: %.4f, 输出单价: %.4f)\n",
-			s.Name, s.Config.Model, s.Config.InputPricePerMillion, s.Config.OutputPricePerMillion)
+			s.Provider.Name(), s.Config.Model, s.Config.InputPricePerMillion, s.Config.OutputPricePerMillion)
 	}
 	fmt.Println()
 
@@ -40,6 +41,7 @@ func main() {
 	fmt.Printf("使用策略: %s\n", strategy)
 	fmt.Println()
 
+	// 调度器（供应商 + 调度策略）
 	router := llmlib.NewRouter(services, strategy)
 
 	messages := []llmlib.Message{

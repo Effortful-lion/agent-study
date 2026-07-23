@@ -11,6 +11,7 @@ import (
 	"github.com/Effortful-lion/agent-study/llmLib"
 )
 
+// 计算器 tool 实现
 type CalculatorTool struct{}
 
 func (t *CalculatorTool) Name() string {
@@ -39,6 +40,7 @@ func (t *CalculatorTool) Call(ctx context.Context, args map[string]interface{}) 
 	return fmt.Sprintf("计算结果: %v", result), nil
 }
 
+// 计算
 func evaluate(expr string) (float64, error) {
 	tokens := tokenize(expr)
 	if len(tokens) == 0 {
@@ -152,6 +154,7 @@ func applyOperator(values *[]float64, op string) error {
 	return nil
 }
 
+// 时间 tool 实现
 type TimeTool struct{}
 
 func (t *TimeTool) Name() string {
@@ -170,37 +173,47 @@ func (t *TimeTool) Call(ctx context.Context, args map[string]interface{}) (inter
 	return time.Now().Format(time.RFC3339), nil
 }
 
+// 调用工具 main
 func main() {
-	providerName := "doubao"
-	apiKey := os.Getenv("DOUBAO_API_KEY")
+	// 获得 llm
+	providerName := llmlib.ProviderDoubao
+	apiKey := os.Getenv(llmlib.DOUBAO_API_KEY)
 	if apiKey == "" {
 		fmt.Println("请设置 DOUBAO_API_KEY 环境变量")
 		return
 	}
-
 	p, err := llmlib.NewProvider(providerName)
 	if err != nil {
 		fmt.Printf("创建 provider 失败: %v\n", err)
 		return
 	}
 
-	registry := llmlib.NewRegistry()
-	registry.Register(&CalculatorTool{})
-	registry.Register(&TimeTool{})
+	// 创建工具注册表
+	toolSet := llmlib.NewRegistryToolSet()
+	// 注册两个工具
+	toolSet.Register(&CalculatorTool{})
+	toolSet.Register(&TimeTool{})
 
-	budget := llmlib.DefaultAgentBudget()
+	// 配置 agent 默认预算配置（防止超预算）
+	budget := llmlib.DefaultAgentBudgetConfig()
+	// 可以覆盖默认配置
 	budget.MaxSteps = 5
 
-	agent := llmlib.New(p, "doubao-seed-2-0-code-preview-260215", registry,
+	// 创建 agent = 供应商 + 具体模型 + toolSet + prompt
+	// modelName := "doubao-seed-2-0-code-preview-260215"
+	modelName := llmlib.DOUBAO_DEFAULT_MODEL
+	agent := llmlib.New(p, modelName, toolSet,
 		llmlib.WithSystemPrompt("你是一个能调用工具的 AI 助手。需要计算或查询时间时请调用工具。"),
-		llmlib.WithAgentBudget(budget),
+		llmlib.WithAgentBudgetConfig(budget),
 	)
 
+	// 13 & now()
 	goal := "计算 3+5*2 的结果，然后告诉我现在的时间"
 
 	fmt.Printf("Agent 目标: %s\n", goal)
 	fmt.Println("--- 事件流 ---")
 
+	// TODO 失败！！！
 	events, err := agent.Run(context.Background(), goal)
 	if err != nil {
 		fmt.Printf("Agent 运行失败: %v\n", err)

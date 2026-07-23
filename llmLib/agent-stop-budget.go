@@ -7,9 +7,9 @@ package llmlib
 
 import "time"
 
-// AgentBudget 定义 Agent 的停止条件和预算约束，所有字段为 0 表示不限制。
+// AgentBudgetConfig 定义 Agent 的停止条件和预算约束，所有字段为 0 表示不限制。
 // 预算是 Agent 运行时的重要护栏，确保执行过程可控、可感知。
-type AgentBudget struct {
+type AgentBudgetConfig struct {
 	MaxSteps         int           // 最大执行步数，0 表示不限制
 	MaxTotalTokens   int           // 累计最大 token 数，0 表示不限制
 	MaxDuration      time.Duration // 最大运行时长，0 表示不限制
@@ -17,10 +17,10 @@ type AgentBudget struct {
 	MaxActionRetries int           // 同一动作最大重复次数，防止死循环
 }
 
-// DefaultAgentBudget 返回一个安全的默认预算配置，适用于大多数场景。
+// DefaultAgentBudgetConfig 返回一个安全的默认预算配置，适用于大多数场景。
 // 默认配置：10 步、100000 token、5 分钟、3 次重试、3 次动作重复。
-func DefaultAgentBudget() AgentBudget {
-	return AgentBudget{
+func DefaultAgentBudgetConfig() AgentBudgetConfig {
+	return AgentBudgetConfig{
 		MaxSteps:         10,
 		MaxTotalTokens:   100000,
 		MaxDuration:      5 * time.Minute,
@@ -31,7 +31,7 @@ func DefaultAgentBudget() AgentBudget {
 
 // ShouldStop 根据当前状态判断是否应停止执行。
 // 满足以下任一条件即停止：步数超限、token 超限、时长超限。
-func (b AgentBudget) ShouldStop(state *State) bool {
+func (b AgentBudgetConfig) ShouldStop(state *State) bool {
 	if b.MaxSteps > 0 && state.Step >= b.MaxSteps {
 		return true
 	}
@@ -46,7 +46,7 @@ func (b AgentBudget) ShouldStop(state *State) bool {
 
 // ShouldRetry 判断是否应重试某动作，防止同一动作无限循环。
 // 当 MaxActionRetries <= 0 时允许无限重试。
-func (b AgentBudget) ShouldRetry(actionKey string, actionCounts map[string]int) bool {
+func (b AgentBudgetConfig) ShouldRetry(actionKey string, actionCounts map[string]int) bool {
 	if b.MaxActionRetries <= 0 {
 		return true
 	}

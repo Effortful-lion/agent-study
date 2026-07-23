@@ -12,49 +12,49 @@ import (
 func TestAgentBudget_ShouldStop(t *testing.T) {
 	tests := []struct {
 		name   string
-		budget AgentBudget
+		budget AgentBudgetConfig
 		state  *State
 		want   bool
 	}{
 		{
 			name:   "no limit",
-			budget: AgentBudget{},
+			budget: AgentBudgetConfig{},
 			state:  &State{Step: 100, Usage: Usage{InputTokens: 1000000}},
 			want:   false,
 		},
 		{
 			name:   "exceed max steps",
-			budget: AgentBudget{MaxSteps: 5},
+			budget: AgentBudgetConfig{MaxSteps: 5},
 			state:  &State{Step: 5},
 			want:   true,
 		},
 		{
 			name:   "not exceed max steps",
-			budget: AgentBudget{MaxSteps: 5},
+			budget: AgentBudgetConfig{MaxSteps: 5},
 			state:  &State{Step: 4},
 			want:   false,
 		},
 		{
 			name:   "exceed max tokens",
-			budget: AgentBudget{MaxTotalTokens: 100},
+			budget: AgentBudgetConfig{MaxTotalTokens: 100},
 			state:  &State{Usage: Usage{InputTokens: 60, OutputTokens: 50}},
 			want:   true,
 		},
 		{
 			name:   "not exceed max tokens",
-			budget: AgentBudget{MaxTotalTokens: 100},
+			budget: AgentBudgetConfig{MaxTotalTokens: 100},
 			state:  &State{Usage: Usage{InputTokens: 40, OutputTokens: 50}},
 			want:   false,
 		},
 		{
 			name:   "exceed max duration",
-			budget: AgentBudget{MaxDuration: time.Millisecond},
+			budget: AgentBudgetConfig{MaxDuration: time.Millisecond},
 			state:  &State{StartedAt: time.Now().Add(-2 * time.Millisecond)},
 			want:   true,
 		},
 		{
 			name:   "not exceed max duration",
-			budget: AgentBudget{MaxDuration: time.Hour},
+			budget: AgentBudgetConfig{MaxDuration: time.Hour},
 			state:  &State{StartedAt: time.Now()},
 			want:   false,
 		},
@@ -174,8 +174,8 @@ func TestLevels(t *testing.T) {
 			wantLen: 2,
 		},
 		{
-			name: "empty plan",
-			plan: Plan{Tasks: []Task{}},
+			name:    "empty plan",
+			plan:    Plan{Tasks: []Task{}},
 			wantErr: false,
 			wantLen: 0,
 		},
@@ -255,10 +255,12 @@ type mockTool struct {
 	result      string
 }
 
-func (t *mockTool) Name() string                                    { return t.name }
-func (t *mockTool) Description() string                             { return t.description }
-func (t *mockTool) Parameters() map[string]string                   { return map[string]string{} }
-func (t *mockTool) Call(ctx context.Context, args map[string]interface{}) (interface{}, error) { return t.result, nil }
+func (t *mockTool) Name() string                  { return t.name }
+func (t *mockTool) Description() string           { return t.description }
+func (t *mockTool) Parameters() map[string]string { return map[string]string{} }
+func (t *mockTool) Call(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	return t.result, nil
+}
 
 func TestAgent_Run_WithToolCall(t *testing.T) {
 	mockTool := &mockTool{
@@ -274,7 +276,7 @@ func TestAgent_Run_WithToolCall(t *testing.T) {
 		},
 	}
 
-	registry := NewRegistry()
+	registry := NewRegistryToolSet()
 	registry.Register(mockTool)
 	agent := New(mock, "test-model", registry)
 
@@ -381,7 +383,7 @@ func TestAgent_Run_ReActFallback(t *testing.T) {
 		},
 	}
 
-	registry := NewRegistry()
+	registry := NewRegistryToolSet()
 	registry.Register(mockTool)
 	agent := New(mock, "test-model", registry)
 
