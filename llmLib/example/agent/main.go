@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Effortful-lion/agent-study/llmLib"
+	llmlib "github.com/Effortful-lion/agent-study/llmLib"
 )
 
 // 计算器 tool 实现

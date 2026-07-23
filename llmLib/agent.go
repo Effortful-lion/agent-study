@@ -100,6 +100,7 @@ func (agent *Agent) Run(ctx context.Context, goal string) (<-chan AgentEvent, er
 			}
 
 			messages := agent.buildMessages(state)
+			// TODO 完整请求 URL 为空，只拼接了路径 `/chat/completions`，缺少 `baseURL`（域名 + https://）
 			resp, err := agent.callModel(ctx, messages)
 			if err != nil {
 				select {
