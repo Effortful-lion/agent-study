@@ -9,8 +9,7 @@ import (
 )
 
 func main() {
-	providerName := "doubao"
-	apiKey := os.Getenv("DOUBAO_API_KEY")
+	apiKey := os.Getenv(llmlib.DOUBAO_API_KEY)
 	if apiKey == "" {
 		fmt.Println("请设置 DOUBAO_API_KEY 环境变量")
 		return
@@ -20,7 +19,7 @@ func main() {
 		llmlib.NewUserMessage("用一句话描述什么是人工智能"),
 	}
 
-	stream, err := llmlib.ChatStream(context.Background(), providerName, apiKey, messages)
+	stream, err := llmlib.ChatStream(context.Background(), llmlib.ProviderDoubao, apiKey, messages)
 	if err != nil {
 		fmt.Printf("流式聊天失败: %v\n", err)
 		return
