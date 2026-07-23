@@ -11,22 +11,28 @@ import (
 
 // parseOpenAIDelta 从 OpenAI 风格的 SSE data 负载中提取文本增量和结束状态。
 func parseOpenAIDelta(data []byte) (delta string, done bool, err error) {
+	delta, done, _, err = parseOpenAIDeltaWithTools(data)
+	return
+}
+
+// parseOpenAIDeltaWithTools 从 OpenAI 风格的 SSE data 负载中提取文本增量、结束状态和工具调用。
+func parseOpenAIDeltaWithTools(data []byte) (delta string, done bool, toolCalls []ToolCall, err error) {
 	if string(data) == "[DONE]" {
-		return "", true, nil
+		return "", true, nil, nil
 	}
 	var chunk struct {
 		Choices []struct {
 			Delta struct {
-				Content string `json:"content"`
+				Content   string     `json:"content"`
+				ToolCalls []ToolCall `json:"tool_calls"`
 			} `json:"delta"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(data, &chunk); err != nil {
-		return "", false, fmt.Errorf("解析 OpenAI 流事件: %w", err)
+		return "", false, nil, fmt.Errorf("解析 OpenAI 流事件: %w", err)
 	}
-	// 无 choice 时视为可忽略空事件，继续等待后续文本片段。
 	if len(chunk.Choices) == 0 {
-		return "", false, nil
+		return "", false, nil, nil
 	}
-	return chunk.Choices[0].Delta.Content, false, nil
+	return chunk.Choices[0].Delta.Content, false, chunk.Choices[0].Delta.ToolCalls, nil
 }

@@ -29,6 +29,9 @@ func Chat(ctx context.Context, providerName string, apiKey string, messages []Me
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = getDefaultBaseURL(providerName)
 	}
+	if cfg.Model == "" {
+		cfg.Model = getDefaultModel(providerName)
+	}
 
 	return p.Chat(ctx, cfg, messages)
 }
@@ -51,6 +54,9 @@ func ChatStream(ctx context.Context, providerName string, apiKey string, message
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = getDefaultBaseURL(providerName)
 	}
+	if cfg.Model == "" {
+		cfg.Model = getDefaultModel(providerName)
+	}
 
 	return p.ChatStream(ctx, cfg, messages)
 }
@@ -58,20 +64,41 @@ func ChatStream(ctx context.Context, providerName string, apiKey string, message
 // getDefaultBaseURL 根据服务商名称返回内置默认接口地址。
 func getDefaultBaseURL(providerName string) string {
 	switch providerName {
-	case "openai":
+	case ProviderOpenAI:
 		return OPENAI_BASEURL
-	case "doubao":
+	case ProviderDoubao:
 		return DOUBAO_BASEURL
-	case "deepseek":
+	case ProviderDeepSeek:
 		return DEEPSEEK_BASEURL
-	case "claude":
+	case ProviderClaude:
 		return CLAUDE_BASEURL
-	case "zhipu":
+	case ProviderZhipu:
 		return ZHIPU_BASEURL
-	case "tongyi":
+	case ProviderTongyi:
 		return TONGYI_BASEURL
-	case "kimi":
+	case ProviderKimi:
 		return KIMI_BASEURL
+	default:
+		return ""
+	}
+}
+
+func getDefaultModel(providerName string) string {
+	switch providerName {
+	case ProviderOpenAI:
+		return OPENAI_DEFAULT_MODEL
+	case ProviderDoubao:
+		return DOUBAO_DEFAULT_MODEL
+	case ProviderDeepSeek:
+		return DEEPSEEK_DEFAULT_MODEL
+	case ProviderClaude:
+		return CLAUDE_DEFAULT_MODEL
+	case ProviderZhipu:
+		return ZHIPU_DEFAULT_MODEL
+	case ProviderTongyi:
+		return TONGYI_DEFAULT_MODEL
+	case ProviderKimi:
+		return KIMI_DEFAULT_MODEL
 	default:
 		return ""
 	}

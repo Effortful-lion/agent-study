@@ -63,6 +63,70 @@ type Router struct {
 	metrics  *LatencyMetrics
 }
 
+// RouterAdapter 适配 Router 使其实现 Provider 和 ToolCallProvider 接口，供 Agent 使用。
+type RouterAdapter struct {
+	router *Router
+}
+
+func NewRouterAdapter(router *Router) *RouterAdapter {
+	return &RouterAdapter{router: router}
+}
+
+func (a *RouterAdapter) Name() string {
+	return "router"
+}
+
+func (a *RouterAdapter) Chat(ctx context.Context, cfg LLMConfig, messages []Message) (*ChatResponse, error) {
+	result, err := a.router.Chat(ctx, messages)
+	if err != nil {
+		return nil, err
+	}
+	return result.Response, nil
+}
+
+func (a *RouterAdapter) ChatStream(ctx context.Context, cfg LLMConfig, messages []Message) (<-chan StreamChunk, error) {
+	routeStream, err := a.router.ChatStream(ctx, messages)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan StreamChunk)
+	go func() {
+		defer close(out)
+		for chunk := range routeStream {
+			select {
+			case out <- StreamChunk{Content: chunk.Content, Err: chunk.Err}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
+func (a *RouterAdapter) ChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message, tools []ToolDef) (*ChatResponse, error) {
+	for _, service := range selectStrategy(a.router.strategy, a.router.services) {
+		if tcp, ok := service.Provider.(ToolCallProvider); ok {
+			resp, err := tcp.ChatWithTools(ctx, service.Config, messages, tools)
+			if err == nil {
+				return resp, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no tool call provider available in router")
+}
+
+func (a *RouterAdapter) ChatStreamWithTools(ctx context.Context, cfg LLMConfig, messages []Message, tools []ToolDef) (<-chan StreamChunk, error) {
+	for _, service := range selectStrategy(a.router.strategy, a.router.services) {
+		if tcp, ok := service.Provider.(ToolCallProvider); ok {
+			stream, err := tcp.ChatStreamWithTools(ctx, service.Config, messages, tools)
+			if err == nil {
+				return stream, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no tool call provider available in router")
+}
+
 // NewRouter 创建一个可在多个服务商之间切换的路由器实例。
 func NewRouter(services []LLMService, strategy Strategy) *Router {
 	return &Router{

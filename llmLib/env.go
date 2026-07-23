@@ -29,77 +29,77 @@ type providerMeta struct {
 var providerMetas = []providerMeta{
 	{
 		Name:           "doubao",
-		APIKeyEnv:      "DOUBAO_API_KEY",
-		BaseURLEnv:     "DOUBAO_BASE_URL",
-		ModelEnv:       "DOUBAO_MODEL",
+		APIKeyEnv:      DOUBAO_API_KEY,
+		BaseURLEnv:     DOUBAO_BASE_URL,
+		ModelEnv:       DOUBAO_MODEL_ENV,
 		DefaultBaseURL: DOUBAO_BASEURL,
-		DefaultModel:   "doubao-seed-2-0-code-preview-260215",
+		DefaultModel:   DOUBAO_DEFAULT_MODEL,
 		InputPrice:     0.20,
 		OutputPrice:    0.80,
 		LatencyMS:      300,
 	},
 	{
 		Name:           "deepseek",
-		APIKeyEnv:      "DEEPSEEK_API_KEY",
-		BaseURLEnv:     "DEEPSEEK_BASE_URL",
-		ModelEnv:       "DEEPSEEK_MODEL",
+		APIKeyEnv:      DEEPSEEK_API_KEY,
+		BaseURLEnv:     DEEPSEEK_BASE_URL,
+		ModelEnv:       DEEPSEEK_MODEL_ENV,
 		DefaultBaseURL: DEEPSEEK_BASEURL,
-		DefaultModel:   "deepseek-chat",
+		DefaultModel:   DEEPSEEK_DEFAULT_MODEL,
 		InputPrice:     0.27,
 		OutputPrice:    1.10,
 		LatencyMS:      500,
 	},
 	{
 		Name:           "claude",
-		APIKeyEnv:      "CLAUDE_API_KEY",
-		BaseURLEnv:     "CLAUDE_BASE_URL",
-		ModelEnv:       "CLAUDE_MODEL",
+		APIKeyEnv:      CLAUDE_API_KEY,
+		BaseURLEnv:     CLAUDE_BASE_URL,
+		ModelEnv:       CLAUDE_MODEL_ENV,
 		DefaultBaseURL: CLAUDE_BASEURL,
-		DefaultModel:   "claude-3-5-sonnet-latest",
+		DefaultModel:   CLAUDE_DEFAULT_MODEL,
 		InputPrice:     3.00,
 		OutputPrice:    15.00,
 		LatencyMS:      800,
 	},
 	{
 		Name:           "openai",
-		APIKeyEnv:      "OPENAI_API_KEY",
-		BaseURLEnv:     "OPENAI_BASE_URL",
-		ModelEnv:       "OPENAI_MODEL",
+		APIKeyEnv:      OPENAI_API_KEY,
+		BaseURLEnv:     OPENAI_BASE_URL,
+		ModelEnv:       OPENAI_MODEL_ENV,
 		DefaultBaseURL: OPENAI_BASEURL,
-		DefaultModel:   "gpt-4o",
+		DefaultModel:   OPENAI_DEFAULT_MODEL,
 		InputPrice:     5.00,
 		OutputPrice:    15.00,
 		LatencyMS:      600,
 	},
 	{
 		Name:           "zhipu",
-		APIKeyEnv:      "ZHIPU_API_KEY",
-		BaseURLEnv:     "ZHIPU_BASE_URL",
-		ModelEnv:       "ZHIPU_MODEL",
+		APIKeyEnv:      ZHIPU_API_KEY,
+		BaseURLEnv:     ZHIPU_BASE_URL,
+		ModelEnv:       ZHIPU_MODEL_ENV,
 		DefaultBaseURL: ZHIPU_BASEURL,
-		DefaultModel:   "glm-4",
+		DefaultModel:   ZHIPU_DEFAULT_MODEL,
 		InputPrice:     0.15,
 		OutputPrice:    0.60,
 		LatencyMS:      400,
 	},
 	{
 		Name:           "tongyi",
-		APIKeyEnv:      "TONGYI_API_KEY",
-		BaseURLEnv:     "TONGYI_BASE_URL",
-		ModelEnv:       "TONGYI_MODEL",
+		APIKeyEnv:      TONGYI_API_KEY,
+		BaseURLEnv:     TONGYI_BASE_URL,
+		ModelEnv:       TONGYI_MODEL_ENV,
 		DefaultBaseURL: TONGYI_BASEURL,
-		DefaultModel:   "qwen-plus",
+		DefaultModel:   TONGYI_DEFAULT_MODEL,
 		InputPrice:     0.50,
 		OutputPrice:    1.50,
 		LatencyMS:      550,
 	},
 	{
 		Name:           "kimi",
-		APIKeyEnv:      "KIMI_API_KEY",
-		BaseURLEnv:     "KIMI_BASE_URL",
-		ModelEnv:       "KIMI_MODEL",
+		APIKeyEnv:      KIMI_API_KEY,
+		BaseURLEnv:     KIMI_BASE_URL,
+		ModelEnv:       KIMI_MODEL_ENV,
 		DefaultBaseURL: KIMI_BASEURL,
-		DefaultModel:   "moonshot-v1-8k",
+		DefaultModel:   KIMI_DEFAULT_MODEL,
 		InputPrice:     0.30,
 		OutputPrice:    1.20,
 		LatencyMS:      450,
@@ -163,9 +163,9 @@ func LoadAllWithEnv(envPath string) ([]LLMService, error) {
 
 	providerNames := loadProviderNames()
 	services := make([]LLMService, 0, len(providerNames))
-	explicitProviders := strings.TrimSpace(os.Getenv("LLM_PROVIDERS")) != ""
-	var missingConfigs []string
 	var configuredProviders []string
+
+	useSimpleConfig := len(providerNames) == 1
 
 	for _, name := range providerNames {
 		// 先校验 provider 是否为内置支持项，再尝试装配环境变量。
@@ -174,11 +174,8 @@ func LoadAllWithEnv(envPath string) ([]LLMService, error) {
 			return nil, fmt.Errorf("unknown provider: %s\n\n%s", name, ProviderConfigHelp())
 		}
 
-		cfg, ok := loadProviderConfig(meta)
+		cfg, ok := loadProviderConfig(meta, useSimpleConfig)
 		if !ok {
-			if explicitProviders {
-				missingConfigs = append(missingConfigs, fmt.Sprintf("provider %q 已启用，但缺少 %s", meta.Name, meta.APIKeyEnv))
-			}
 			continue
 		}
 
@@ -193,40 +190,38 @@ func LoadAllWithEnv(envPath string) ([]LLMService, error) {
 		})
 	}
 
-	if len(missingConfigs) > 0 {
-		return nil, fmt.Errorf("%s\n\n%s", strings.Join(missingConfigs, "\n"), ProviderConfigHelp())
-	}
 	if len(services) == 0 {
 		return nil, fmt.Errorf("未配置任何模型服务商。\n\n%s", ProviderConfigHelp())
 	}
 
-	if !explicitProviders && len(configuredProviders) > 0 {
-		fmt.Fprintf(os.Stderr, "[llmlib] 警告: 未设置 LLM_PROVIDERS，已自动启用以下已配置的服务商: %s\n", strings.Join(configuredProviders, ", "))
-		fmt.Fprintf(os.Stderr, "[llmlib] 建议: 通过 export LLM_PROVIDERS=%s 显式指定服务商顺序\n", strings.Join(configuredProviders, ","))
+	if useSimpleConfig && len(configuredProviders) > 0 {
+		fmt.Fprintf(os.Stderr, "[llmlib] 提示: 当前启用单个 provider (%s)，使用简化配置模式\n", configuredProviders[0])
+		fmt.Fprintf(os.Stderr, "[llmlib] 简化配置: API_KEY, BASE_URL, MODEL\n")
+		fmt.Fprintf(os.Stderr, "[llmlib] 如需多 provider，请设置 provider_API_KEY (如 DOUBAO_API_KEY, DEEPSEEK_API_KEY) 启用多个服务商\n")
+	} else if !useSimpleConfig && len(configuredProviders) > 0 {
+		fmt.Fprintf(os.Stderr, "[llmlib] 提示: 当前启用多个 provider (%s)，使用具名配置模式\n", strings.Join(configuredProviders, ", "))
+		fmt.Fprintf(os.Stderr, "[llmlib] 具名配置: provider_API_KEY, provider_BASE_URL, provider_MODEL\n")
 	}
 
 	return services, nil
 }
 
-// loadProviderNames 从 LLM_PROVIDERS 解析服务商顺序，未设置时返回全部内置服务商。
+// loadProviderNames 自动检测已配置的服务商，返回已设置 API_KEY 的 provider 列表。
+// 检测优先级：provider 特定的 API_KEY > 通用 API_KEY。
+// 单 provider 场景下，用户只需设置 API_KEY；多 provider 场景下，需设置 provider_API_KEY。
 func loadProviderNames() []string {
-	raw := os.Getenv("LLM_PROVIDERS")
-	if raw == "" {
-		names := make([]string, 0, len(providerMetas))
-		for _, provider := range providerMetas {
+	var names []string
+
+	for _, provider := range providerMetas {
+		apiKey := strings.TrimSpace(os.Getenv(provider.APIKeyEnv))
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(os.Getenv(API_KEY))
+		}
+		if apiKey != "" {
 			names = append(names, provider.Name)
 		}
-		return names
 	}
 
-	parts := strings.Split(raw, ",")
-	names := make([]string, 0, len(parts))
-	for _, part := range parts {
-		name := strings.ToLower(strings.TrimSpace(part))
-		if name != "" {
-			names = append(names, name)
-		}
-	}
 	return names
 }
 
@@ -241,18 +236,36 @@ func findProviderMeta(name string) (providerMeta, bool) {
 }
 
 // loadProviderConfig 从环境变量装配单个服务商配置，缺少 API Key 时返回未启用。
-func loadProviderConfig(provider providerMeta) (LLMConfig, bool) {
-	apiKey := strings.TrimSpace(os.Getenv(provider.APIKeyEnv))
+// useSimpleConfig 为 true 时仅使用通用变量（API_KEY、BASE_URL、MODEL），适用于单 provider 场景。
+func loadProviderConfig(provider providerMeta, useSimpleConfig bool) (LLMConfig, bool) {
+	var apiKey, baseURL, model string
+
+	if useSimpleConfig {
+		apiKey = strings.TrimSpace(os.Getenv(API_KEY))
+		baseURL = strings.TrimRight(strings.TrimSpace(os.Getenv(BASE_URL)), "/")
+		model = strings.TrimSpace(os.Getenv(MODEL))
+	} else {
+		apiKey = strings.TrimSpace(os.Getenv(provider.APIKeyEnv))
+		if apiKey == "" {
+			apiKey = strings.TrimSpace(os.Getenv(API_KEY))
+		}
+		baseURL = strings.TrimRight(strings.TrimSpace(os.Getenv(provider.BaseURLEnv)), "/")
+		if baseURL == "" {
+			baseURL = strings.TrimRight(strings.TrimSpace(os.Getenv(BASE_URL)), "/")
+		}
+		model = strings.TrimSpace(os.Getenv(provider.ModelEnv))
+		if model == "" {
+			model = strings.TrimSpace(os.Getenv(MODEL))
+		}
+	}
+
 	if apiKey == "" {
 		return LLMConfig{}, false
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv(provider.BaseURLEnv)), "/")
 	if baseURL == "" {
 		baseURL = provider.DefaultBaseURL
 	}
-
-	model := strings.TrimSpace(os.Getenv(provider.ModelEnv))
 	if model == "" {
 		model = provider.DefaultModel
 	}
@@ -291,11 +304,17 @@ func ProviderConfigHelp() string {
 		}
 		b.WriteString(provider.Name)
 	}
-	b.WriteString("\n\n配置规则：\n")
-	b.WriteString("- LLM_PROVIDERS 控制启用顺序，例如：export LLM_PROVIDERS=doubao,deepseek\n")
+	b.WriteString("\n\n配置方式：\n")
+	b.WriteString("  1. 简化配置（单 provider 场景）：仅设置 API_KEY、BASE_URL、MODEL，系统自动检测\n")
+	b.WriteString("  2. 具名配置（多 provider 场景）：设置 provider_API_KEY（如 DOUBAO_API_KEY），系统自动启用\n")
+	b.WriteString("     优先级：provider 特定变量 > 通用变量 > 默认值\n\n")
+	b.WriteString("通用变量（适用于所有 provider）：\n")
+	b.WriteString("- API_KEY：通用 API Key\n")
+	b.WriteString("- BASE_URL：通用接口地址\n")
+	b.WriteString("- MODEL：通用模型名称\n\n")
+	b.WriteString("全局配置：\n")
 	b.WriteString("- LLM_ROUTING_STRATEGY 控制调度策略：default、cheapest_first、lowest_latency\n")
-	b.WriteString("- *_LATENCY_MS 控制最低延迟策略使用的静态延迟指标\n")
-	b.WriteString("- 每个 provider 使用自己独立的 API Key，不能共用 LLM_API_KEY\n\n")
+	b.WriteString("- *_LATENCY_MS 控制最低延迟策略使用的静态延迟指标\n\n")
 
 	b.WriteString("各 provider 配置：\n")
 	for _, provider := range providerMetas {
@@ -310,8 +329,11 @@ func ProviderConfigHelp() string {
 			provider.LatencyMS,
 		)
 	}
-	b.WriteString("\n总配置示例：\n")
-	b.WriteString("export LLM_PROVIDERS=doubao,deepseek\n")
+	b.WriteString("\n配置示例 - 简化配置（单 provider）：\n")
+	b.WriteString("export API_KEY=ark-xxx\n")
+	b.WriteString("export BASE_URL=https://ark.cn-beijing.volces.com/api/v3\n")
+	b.WriteString("export MODEL=doubao-seed-2-0-code-preview-260215\n\n")
+	b.WriteString("配置示例 - 具名配置（多 provider）：\n")
 	b.WriteString("export LLM_ROUTING_STRATEGY=cheapest_first\n")
 	b.WriteString("export DOUBAO_API_KEY=ark-xxx\n")
 	b.WriteString("export DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3\n")
