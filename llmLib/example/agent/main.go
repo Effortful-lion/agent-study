@@ -28,7 +28,7 @@ func (t *CalculatorTool) Parameters() map[string]string {
 	}
 }
 
-func (t *CalculatorTool) Call(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (t *CalculatorTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	expr, ok := args["expression"].(string)
 	if !ok {
 		return nil, fmt.Errorf("缺少 expression 参数")
@@ -169,7 +169,7 @@ func (t *TimeTool) Parameters() map[string]string {
 	return map[string]string{}
 }
 
-func (t *TimeTool) Call(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (t *TimeTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	return time.Now().Format(time.RFC3339), nil
 }
 

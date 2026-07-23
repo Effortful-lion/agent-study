@@ -28,7 +28,7 @@ func (t *CalculatorTool) Parameters() map[string]string {
 	}
 }
 
-func (t *CalculatorTool) Call(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (t *CalculatorTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	expr, ok := args["expression"].(string)
 	if !ok {
 		return nil, fmt.Errorf("缺少 expression 参数")
@@ -167,13 +167,13 @@ func (t *TimeTool) Parameters() map[string]string {
 	return map[string]string{}
 }
 
-func (t *TimeTool) Call(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (t *TimeTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	return time.Now().Format(time.RFC3339), nil
 }
 
 func main() {
-	providerName := "doubao"
-	apiKey := os.Getenv("DOUBAO_API_KEY")
+	providerName := llmlib.ProviderDoubao
+	apiKey := os.Getenv(llmlib.DOUBAO_API_KEY)
 	if apiKey == "" {
 		fmt.Println("请设置 DOUBAO_API_KEY 环境变量")
 		return
@@ -189,7 +189,7 @@ func main() {
 		return
 	}
 
-	tcp, ok := p.(llmlib.ToolCallProvider)
+	tcpr, ok := p.(llmlib.ToolCallProvider)
 	if !ok {
 		fmt.Println("provider 不支持工具调用")
 		return
@@ -199,7 +199,7 @@ func main() {
 		llmlib.NewUserMessage("计算 2*(3+5) 的结果"),
 	}
 
-	resp, err := tcp.ChatWithTools(context.Background(), llmlib.LLMConfig{APIKey: apiKey}, messages, registry.ToolDefs())
+	resp, err := tcpr.ChatWithTools(context.Background(), llmlib.LLMConfig{APIKey: apiKey}, messages, registry.ToolDefs())
 	if err != nil {
 		fmt.Printf("工具调用失败: %v\n", err)
 		return
@@ -208,7 +208,7 @@ func main() {
 	if len(resp.ToolCalls) > 0 {
 		for _, tc := range resp.ToolCalls {
 			fmt.Printf("工具调用: %s, 参数: %s\n", tc.Name, string(tc.Args))
-			var args map[string]interface{}
+			var args map[string]any
 			if err := json.Unmarshal(tc.Args, &args); err != nil {
 				fmt.Printf("参数解析失败: %v\n", err)
 				continue

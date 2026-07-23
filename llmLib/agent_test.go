@@ -258,7 +258,7 @@ type mockTool struct {
 func (t *mockTool) Name() string                  { return t.name }
 func (t *mockTool) Description() string           { return t.description }
 func (t *mockTool) Parameters() map[string]string { return map[string]string{} }
-func (t *mockTool) Call(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+func (t *mockTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	return t.result, nil
 }
 

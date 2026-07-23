@@ -32,13 +32,13 @@ func (p *FunctionCallingParadigm) Detect(content string) bool {
 // Parse 解析 JSON 格式的工具调用。
 func (p *FunctionCallingParadigm) Parse(content string) ([]ToolCall, error) {
 	var calls []ToolCall
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal([]byte(content), &data); err != nil {
 		return nil, NewAgentError(ErrCategoryModel, "工具调用格式解析失败", err, false)
 	}
-	if toolCalls, ok := data["tool_calls"].([]interface{}); ok {
+	if toolCalls, ok := data["tool_calls"].([]any); ok {
 		for _, tc := range toolCalls {
-			if call, ok := tc.(map[string]interface{}); ok {
+			if call, ok := tc.(map[string]any); ok {
 				name, _ := call["name"].(string)
 				argsRaw, _ := call["arguments"].([]byte)
 				if name != "" {
@@ -47,7 +47,7 @@ func (p *FunctionCallingParadigm) Parse(content string) ([]ToolCall, error) {
 			}
 		}
 	}
-	if function, ok := data["function"].(map[string]interface{}); ok {
+	if function, ok := data["function"].(map[string]any); ok {
 		name, _ := function["name"].(string)
 		argsStr, _ := function["arguments"].(string)
 		var args json.RawMessage

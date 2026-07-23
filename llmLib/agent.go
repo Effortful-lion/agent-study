@@ -274,7 +274,7 @@ func (agent *Agent) executeTool(ctx context.Context, tc ToolCall) (string, error
 		return "", NewAgentError(ErrCategoryToolNotFound, fmt.Sprintf("工具 %s 不存在", tc.Name), nil, false)
 	}
 
-	var args map[string]interface{}
+	var args map[string]any
 	if tc.Args != nil {
 		if err := json.Unmarshal(tc.Args, &args); err != nil {
 			return "", NewAgentError(ErrCategoryTool, fmt.Sprintf("工具 %s 参数解析失败", tc.Name), err, false)
@@ -284,7 +284,7 @@ func (agent *Agent) executeTool(ctx context.Context, tc ToolCall) (string, error
 	var result string
 	err := RetryWithBackoff(time.Second, time.Minute, agent.budget.MaxRetries, func() error {
 		var err error
-		var res interface{}
+		var res any
 		res, err = tool.Call(ctx, args)
 		if err == nil {
 			result = fmt.Sprintf("%v", res)

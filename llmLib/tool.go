@@ -15,10 +15,10 @@ import (
 // Tool 接口定义 Agent 可调用的工具，实现此接口即可被 Agent 使用。
 // 工具是 Agent 的感知和行动接口，通过工具调用外部服务和能力。
 type Tool interface {
-	Name() string                                                               // 工具名称，用于模型识别和调用
-	Description() string                                                        // 工具描述，用于模型理解工具用途
-	Parameters() map[string]string                                              // 参数描述，key 为参数名，value 为参数类型和说明
-	Call(ctx context.Context, args map[string]interface{}) (interface{}, error) // 执行工具调用
+	Name() string                                               // 工具名称，用于模型识别和调用
+	Description() string                                        // 工具描述，用于模型理解工具用途
+	Parameters() map[string]string                              // 参数描述，key 为参数名，value 为参数类型和说明
+	Call(ctx context.Context, args map[string]any) (any, error) // 执行工具调用
 }
 
 // Registry 是工具注册表，管理 Agent 可用的所有工具。
@@ -60,7 +60,7 @@ func (r *Registry) ToolDefs() []ToolDef {
 }
 
 // Call 调用指定名称的工具，自动解析参数。
-func (r *Registry) Call(ctx context.Context, name string, args map[string]interface{}) (interface{}, error) {
+func (r *Registry) Call(ctx context.Context, name string, args map[string]any) (any, error) {
 	tool, ok := r.Get(name)
 	if !ok {
 		return nil, NewAgentError(ErrCategoryToolNotFound, fmt.Sprintf("工具 %s 不存在", name), nil, false)
@@ -68,21 +68,21 @@ func (r *Registry) Call(ctx context.Context, name string, args map[string]interf
 	return tool.Call(ctx, args)
 }
 
-// BuildArgs 将 JSON 字符串参数转换为 map[string]interface{}。
-func BuildArgs(argsJSON string) (map[string]interface{}, error) {
+// BuildArgs 将 JSON 字符串参数转换为 map[string]any。
+func BuildArgs(argsJSON string) (map[string]any, error) {
 	if argsJSON == "" {
 		return nil, nil
 	}
-	var args map[string]interface{}
+	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return nil, NewAgentError(ErrCategoryTool, "参数解析失败: "+err.Error(), err, false)
 	}
 	return args, nil
 }
 
-// StructToMap 将结构体转换为 map[string]interface{}，用于工具参数传递。
-func StructToMap(v interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
+// StructToMap 将结构体转换为 map[string]any，用于工具参数传递。
+func StructToMap(v any) map[string]any {
+	result := make(map[string]any)
 	val := reflect.ValueOf(v)
 	if val.Kind() == reflect.Ptr {
 		val = val.Elem()

@@ -17,7 +17,7 @@ type Task struct {
 	ID          string   // 任务唯一标识
 	Description string   // 任务描述，用于日志和调试
 	DependsOn   []string // 依赖的任务 ID 列表
-	Action      func(ctx context.Context, inputs map[string]interface{}) (interface{}, error)
+	Action      func(ctx context.Context, inputs map[string]any) (any, error)
 }
 
 // Plan 是任务的有序集合，通过依赖关系控制执行顺序。
@@ -76,24 +76,24 @@ func Levels(plan Plan) ([][]Task, error) {
 // ctx: 上下文，用于取消和超时控制
 // plan: 待执行的计划
 // 返回: 任务执行结果映射，键为任务 ID
-func Execute(ctx context.Context, plan Plan) (map[string]interface{}, error) {
+func Execute(ctx context.Context, plan Plan) (map[string]any, error) {
 	levels, err := Levels(plan)
 	if err != nil {
 		return nil, err
 	}
-	results := make(map[string]interface{})
+	results := make(map[string]any)
 	for _, level := range levels {
 		if err := ctx.Err(); err != nil {
 			return results, err
 		}
 		var wg sync.WaitGroup
-		levelResults := make(map[string]interface{})
+		levelResults := make(map[string]any)
 		levelErrors := make(map[string]error)
 		for _, task := range level {
 			wg.Add(1)
 			go func(t Task) {
 				defer wg.Done()
-				inputs := make(map[string]interface{})
+				inputs := make(map[string]any)
 				for _, dep := range t.DependsOn {
 					if v, ok := results[dep]; ok {
 						inputs[dep] = v
