@@ -82,7 +82,7 @@ func parseExpression(tokens []string) (float64, error) {
 	values := make([]float64, 0)
 	operators := make([]string, 0)
 
-	for i := 0; i < len(tokens); i++ {
+	for i := range tokens {
 		token := tokens[i]
 		if token == "+" || token == "-" || token == "*" || token == "/" {
 			for len(operators) > 0 && precedence(operators[len(operators)-1]) >= precedence(token) {
@@ -182,6 +182,11 @@ func main() {
 		fmt.Println("请设置 DOUBAO_API_KEY 环境变量")
 		return
 	}
+	baseURL := os.Getenv(llmlib.DOUBAO_BASE_URL)
+	if baseURL == "" {
+		baseURL = llmlib.DOUBAO_BASEURL
+	}
+
 	p, err := llmlib.NewProvider(providerName)
 	if err != nil {
 		fmt.Printf("创建 provider 失败: %v\n", err)
@@ -205,6 +210,8 @@ func main() {
 	agent := llmlib.New(p, modelName, toolSet,
 		llmlib.WithSystemPrompt("你是一个能调用工具的 AI 助手。需要计算或查询时间时请调用工具。"),
 		llmlib.WithAgentBudgetConfig(budget),
+		llmlib.WithAgentAPIKey(apiKey),
+		llmlib.WithAgentBaseURL(baseURL),
 	)
 
 	// 13 & now()
