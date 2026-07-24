@@ -2,10 +2,15 @@ package llmlib
 
 import "encoding/json"
 
-type ToolDef struct {
+type ToolFunction struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
+}
+
+type ToolDef struct {
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
 }
 
 type Usage struct {
@@ -14,10 +19,10 @@ type Usage struct {
 }
 
 type ChatRequest struct {
-	Model    string      `json:"model"`
-	Messages []Message   `json:"messages"`
-	Stream   bool        `json:"stream"`
-	Tools    []ToolDef   `json:"tools,omitempty"`
+	Model    string    `json:"model"`
+	Messages []Message `json:"messages"`
+	Stream   bool      `json:"stream"`
+	Tools    []ToolDef `json:"tools,omitempty"`
 }
 
 type ChatResponse struct {

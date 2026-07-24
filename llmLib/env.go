@@ -104,6 +104,17 @@ var providerMetas = []providerMeta{
 		OutputPrice:    1.20,
 		LatencyMS:      450,
 	},
+	{
+		Name:           "qwen",
+		APIKeyEnv:      QWEN_API_KEY,
+		BaseURLEnv:     QWEN_BASE_URL,
+		ModelEnv:       QWEN_MODEL_ENV,
+		DefaultBaseURL: QWEN_BASEURL,
+		DefaultModel:   QWEN_DEFAULT_MODEL,
+		InputPrice:     0, // 本地部署，免费
+		OutputPrice:    0,
+		LatencyMS:      50, // 本地部署，延迟极低
+	},
 }
 
 // LoadDotEnv 从当前目录的 .env 文件加载环境变量，供本地开发快速启动。

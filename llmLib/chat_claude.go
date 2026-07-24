@@ -28,16 +28,16 @@ func ClaudeChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message,
 	var claudeTools []claudeTool
 	for _, t := range tools {
 		claudeTools = append(claudeTools, claudeTool{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.Parameters,
+			Name:        t.Function.Name,
+			Description: t.Function.Description,
+			InputSchema: t.Function.Parameters,
 		})
 	}
 
 	reqBody := struct {
-		Model    string          `json:"model"`
-		Messages []Message       `json:"messages"`
-		Tools    []claudeTool    `json:"tools,omitempty"`
+		Model    string       `json:"model"`
+		Messages []Message    `json:"messages"`
+		Tools    []claudeTool `json:"tools,omitempty"`
 	}{
 		Model:    cfg.Model,
 		Messages: messages,
@@ -73,12 +73,12 @@ func ClaudeChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message,
 
 	var raw struct {
 		Content []struct {
-			Type       string          `json:"type"`
-			Text       string          `json:"text"`
-			ToolUse    *struct {
-				ID     string          `json:"id"`
-				Name   string          `json:"name"`
-				Input  json.RawMessage `json:"input"`
+			Type    string `json:"type"`
+			Text    string `json:"text"`
+			ToolUse *struct {
+				ID    string          `json:"id"`
+				Name  string          `json:"name"`
+				Input json.RawMessage `json:"input"`
 			} `json:"tool_use"`
 		} `json:"content"`
 		Usage struct {
@@ -129,17 +129,17 @@ func ClaudeChatStreamWithTools(ctx context.Context, cfg LLMConfig, messages []Me
 	var claudeTools []claudeTool
 	for _, t := range tools {
 		claudeTools = append(claudeTools, claudeTool{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.Parameters,
+			Name:        t.Function.Name,
+			Description: t.Function.Description,
+			InputSchema: t.Function.Parameters,
 		})
 	}
 
 	reqBody := struct {
-		Model    string          `json:"model"`
-		Messages []Message       `json:"messages"`
-		Tools    []claudeTool    `json:"tools,omitempty"`
-		Stream   bool            `json:"stream"`
+		Model    string       `json:"model"`
+		Messages []Message    `json:"messages"`
+		Tools    []claudeTool `json:"tools,omitempty"`
+		Stream   bool         `json:"stream"`
 	}{
 		Model:    cfg.Model,
 		Messages: messages,
@@ -195,9 +195,9 @@ func ClaudeChatStreamWithTools(ctx context.Context, cfg LLMConfig, messages []Me
 				ContentBlock struct {
 					Type    string `json:"type"`
 					ToolUse *struct {
-						ID     string          `json:"id"`
-						Name   string          `json:"name"`
-						Input  json.RawMessage `json:"input"`
+						ID    string          `json:"id"`
+						Name  string          `json:"name"`
+						Input json.RawMessage `json:"input"`
 					} `json:"tool_use"`
 				} `json:"content_block"`
 			}

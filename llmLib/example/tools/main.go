@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Effortful-lion/agent-study/llmLib"
+	llmlib "github.com/Effortful-lion/agent-study/llmLib"
 )
 
 type CalculatorTool struct{}
@@ -59,6 +59,12 @@ func tokenize(expr string) []string {
 				num.Reset()
 			}
 			tokens = append(tokens, string(ch))
+		case ch == '(' || ch == ')':
+			if num.Len() > 0 {
+				tokens = append(tokens, num.String())
+				num.Reset()
+			}
+			tokens = append(tokens, string(ch))
 		case ch >= '0' && ch <= '9' || ch == '.':
 			num.WriteRune(ch)
 		case ch == ' ':
@@ -77,40 +83,88 @@ func parseExpression(tokens []string) (float64, error) {
 	if len(tokens) == 0 {
 		return 0, fmt.Errorf("empty expression")
 	}
+	result, _, err := parseAdditive(tokens, 0)
+	return result, err
+}
 
-	values := make([]float64, 0)
-	operators := make([]string, 0)
+func parseAdditive(tokens []string, pos int) (float64, int, error) {
+	left, pos, err := parseMultiplicative(tokens, pos)
+	if err != nil {
+		return 0, pos, err
+	}
 
-	for i := 0; i < len(tokens); i++ {
-		token := tokens[i]
-		if token == "+" || token == "-" || token == "*" || token == "/" {
-			for len(operators) > 0 && precedence(operators[len(operators)-1]) >= precedence(token) {
-				if err := applyOperator(&values, operators[len(operators)-1]); err != nil {
-					return 0, err
-				}
-				operators = operators[:len(operators)-1]
-			}
-			operators = append(operators, token)
+	for pos < len(tokens) {
+		token := tokens[pos]
+		if token != "+" && token != "-" {
+			break
+		}
+		pos++
+		right, pos, err := parseMultiplicative(tokens, pos)
+		if err != nil {
+			return 0, pos, err
+		}
+		if token == "+" {
+			left += right
 		} else {
-			num, err := strconv.ParseFloat(token, 64)
-			if err != nil {
-				return 0, err
+			left -= right
+		}
+	}
+	return left, pos, nil
+}
+
+func parseMultiplicative(tokens []string, pos int) (float64, int, error) {
+	left, pos, err := parsePrimary(tokens, pos)
+	if err != nil {
+		return 0, pos, err
+	}
+
+	for pos < len(tokens) {
+		token := tokens[pos]
+		if token != "*" && token != "/" {
+			break
+		}
+		pos++
+		right, pos, err := parsePrimary(tokens, pos)
+		if err != nil {
+			return 0, pos, err
+		}
+		if token == "*" {
+			left *= right
+		} else {
+			if right == 0 {
+				return 0, pos, fmt.Errorf("division by zero")
 			}
-			values = append(values, num)
+			left /= right
 		}
 	}
+	return left, pos, nil
+}
 
-	for len(operators) > 0 {
-		if err := applyOperator(&values, operators[len(operators)-1]); err != nil {
-			return 0, err
+func parsePrimary(tokens []string, pos int) (float64, int, error) {
+	if pos >= len(tokens) {
+		return 0, pos, fmt.Errorf("unexpected end of expression")
+	}
+	token := tokens[pos]
+
+	if token == "(" {
+		pos++
+		result, pos, err := parseAdditive(tokens, pos)
+		if err != nil {
+			return 0, pos, err
 		}
-		operators = operators[:len(operators)-1]
+		if pos >= len(tokens) || tokens[pos] != ")" {
+			return 0, pos, fmt.Errorf("mismatched parentheses")
+		}
+		pos++
+		return result, pos, nil
 	}
 
-	if len(values) != 1 {
-		return 0, fmt.Errorf("invalid expression")
+	num, err := strconv.ParseFloat(token, 64)
+	if err != nil {
+		return 0, pos, err
 	}
-	return values[0], nil
+	pos++
+	return num, pos, nil
 }
 
 func precedence(op string) int {
@@ -178,6 +232,10 @@ func main() {
 		fmt.Println("请设置 DOUBAO_API_KEY 环境变量")
 		return
 	}
+	baseURL := os.Getenv(llmlib.DOUBAO_BASE_URL)
+	if baseURL == "" {
+		baseURL = llmlib.DOUBAO_BASEURL
+	}
 
 	registry := llmlib.NewRegistryToolSet()
 	registry.Register(&CalculatorTool{})
@@ -199,7 +257,7 @@ func main() {
 		llmlib.NewUserMessage("计算 2*(3+5) 的结果"),
 	}
 
-	resp, err := tcpr.ChatWithTools(context.Background(), llmlib.LLMConfig{APIKey: apiKey}, messages, registry.ToolDefs())
+	resp, err := tcpr.ChatWithTools(context.Background(), llmlib.LLMConfig{APIKey: apiKey, BaseURL: baseURL, Model: llmlib.DOUBAO_DEFAULT_MODEL}, messages, registry.ToolDefs())
 	if err != nil {
 		fmt.Printf("工具调用失败: %v\n", err)
 		return
@@ -210,8 +268,16 @@ func main() {
 			fmt.Printf("工具调用: %s, 参数: %s\n", tc.Name, string(tc.Args))
 			var args map[string]any
 			if err := json.Unmarshal(tc.Args, &args); err != nil {
-				fmt.Printf("参数解析失败: %v\n", err)
-				continue
+				var argsStr string
+				if json.Unmarshal(tc.Args, &argsStr) == nil {
+					if json.Unmarshal([]byte(argsStr), &args) != nil {
+						fmt.Printf("参数解析失败: %v\n", err)
+						continue
+					}
+				} else {
+					fmt.Printf("参数解析失败: %v\n", err)
+					continue
+				}
 			}
 			result, err := registry.Call(context.Background(), tc.Name, args)
 			if err != nil {

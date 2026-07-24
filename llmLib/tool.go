@@ -51,9 +51,12 @@ func (r *Registry) ToolDefs() []ToolDef {
 	for _, tool := range r.tools {
 		params, _ := json.Marshal(tool.Parameters())
 		defs = append(defs, ToolDef{
-			Name:        tool.Name(),
-			Description: tool.Description(),
-			Parameters:  params,
+			Type: "function",
+			Function: ToolFunction{
+				Name:        tool.Name(),
+				Description: tool.Description(),
+				Parameters:  params,
+			},
 		})
 	}
 	return defs
@@ -75,7 +78,14 @@ func BuildArgs(argsJSON string) (map[string]any, error) {
 	}
 	var args map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return nil, NewAgentError(ErrCategoryTool, "参数解析失败: "+err.Error(), err, false)
+		var argsStr string
+		if json.Unmarshal([]byte(argsJSON), &argsStr) == nil {
+			if json.Unmarshal([]byte(argsStr), &args) != nil {
+				return nil, NewAgentError(ErrCategoryTool, "参数解析失败: "+err.Error(), err, false)
+			}
+		} else {
+			return nil, NewAgentError(ErrCategoryTool, "参数解析失败: "+err.Error(), err, false)
+		}
 	}
 	return args, nil
 }

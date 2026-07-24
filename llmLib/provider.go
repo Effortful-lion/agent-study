@@ -33,6 +33,8 @@ func NewProvider(name string) (Provider, error) {
 		return NewTongyiProvider(), nil
 	case ProviderKimi:
 		return NewKimiProvider(), nil
+	case ProviderQwen:
+		return NewQwenProvider(), nil
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", name)
 	}
@@ -217,5 +219,32 @@ func (p *KimiProvider) ChatWithTools(ctx context.Context, cfg LLMConfig, message
 }
 
 func (p *KimiProvider) ChatStreamWithTools(ctx context.Context, cfg LLMConfig, messages []Message, tools []ToolDef) (<-chan StreamChunk, error) {
+	return OpenAIChatStreamWithTools(ctx, cfg, messages, tools)
+}
+
+// QwenProvider 支持本地或远程部署的 Qwen 系列模型（OpenAI 兼容协议）。
+type QwenProvider struct{}
+
+func NewQwenProvider() *QwenProvider {
+	return &QwenProvider{}
+}
+
+func (p *QwenProvider) Name() string {
+	return "qwen"
+}
+
+func (p *QwenProvider) Chat(ctx context.Context, cfg LLMConfig, messages []Message) (*ChatResponse, error) {
+	return OpenAIChat(ctx, cfg, messages)
+}
+
+func (p *QwenProvider) ChatStream(ctx context.Context, cfg LLMConfig, messages []Message) (<-chan StreamChunk, error) {
+	return OpenAIChatStream(ctx, cfg, messages)
+}
+
+func (p *QwenProvider) ChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message, tools []ToolDef) (*ChatResponse, error) {
+	return OpenAIChatWithTools(ctx, cfg, messages, tools)
+}
+
+func (p *QwenProvider) ChatStreamWithTools(ctx context.Context, cfg LLMConfig, messages []Message, tools []ToolDef) (<-chan StreamChunk, error) {
 	return OpenAIChatStreamWithTools(ctx, cfg, messages, tools)
 }

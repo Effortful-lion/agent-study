@@ -16,7 +16,7 @@ type ClientOption func(*http.Client)
 // NewClient 创建一个带默认超时的 HTTP 客户端，并按顺序应用额外选项。
 func NewClient(opts ...ClientOption) *http.Client {
 	c := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 120 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(c)

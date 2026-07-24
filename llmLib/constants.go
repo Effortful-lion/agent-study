@@ -54,4 +54,12 @@ const (
 	CLAUDE_MODEL_ENV     = "CLAUDE_MODEL"
 	CLAUDE_BASEURL       = "https://api.anthropic.com"
 	CLAUDE_DEFAULT_MODEL = "claude-3-5-sonnet-latest"
+
+	ProviderQwen   = "qwen"
+	QWEN_API_KEY   = "QWEN_API_KEY"
+	QWEN_BASE_URL  = "QWEN_BASE_URL"
+	QWEN_MODEL_ENV = "QWEN_MODEL"
+	// QWEN_BASEURL 默认指向本地部署的 Qwen 模型服务。
+	QWEN_BASEURL       = "http://localhost:8095/v1"
+	QWEN_DEFAULT_MODEL = "qwen3"
 )

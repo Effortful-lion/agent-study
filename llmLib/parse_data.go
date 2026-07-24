@@ -23,8 +23,15 @@ func parseOpenAIDeltaWithTools(data []byte) (delta string, done bool, toolCalls 
 	var chunk struct {
 		Choices []struct {
 			Delta struct {
-				Content   string     `json:"content"`
-				ToolCalls []ToolCall `json:"tool_calls"`
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					ID       string `json:"id"`
+					Type     string `json:"type"`
+					Function struct {
+						Name      string          `json:"name"`
+						Arguments json.RawMessage `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
 			} `json:"delta"`
 		} `json:"choices"`
 	}
@@ -34,5 +41,13 @@ func parseOpenAIDeltaWithTools(data []byte) (delta string, done bool, toolCalls 
 	if len(chunk.Choices) == 0 {
 		return "", false, nil, nil
 	}
-	return chunk.Choices[0].Delta.Content, false, chunk.Choices[0].Delta.ToolCalls, nil
+	for _, tc := range chunk.Choices[0].Delta.ToolCalls {
+		args := normalizeArgs(tc.Function.Arguments)
+		toolCalls = append(toolCalls, ToolCall{
+			ID:   tc.ID,
+			Name: tc.Function.Name,
+			Args: args,
+		})
+	}
+	return chunk.Choices[0].Delta.Content, false, toolCalls, nil
 }
