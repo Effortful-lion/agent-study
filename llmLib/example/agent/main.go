@@ -11,23 +11,16 @@ import (
 	llmlib "github.com/Effortful-lion/agent-study/llmLib"
 )
 
-// 计算器 tool 实现
+// CalculatorTool 数学计算工具
 type CalculatorTool struct{}
 
-func (t *CalculatorTool) Name() string {
-	return "calculator"
-}
-
+func (t *CalculatorTool) Name() string { return "calculator" }
 func (t *CalculatorTool) Description() string {
-	return "执行数学运算，支持加减乘除"
+	return "执行数学运算，支持加减乘除和括号"
 }
-
 func (t *CalculatorTool) Parameters() map[string]string {
-	return map[string]string{
-		"expression": "string, 数学表达式，如 \"2+3*4\"",
-	}
+	return map[string]string{"expression": "string, 数学表达式，如 \"3+5*2\""}
 }
-
 func (t *CalculatorTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	expr, ok := args["expression"].(string)
 	if !ok {
@@ -40,13 +33,26 @@ func (t *CalculatorTool) Call(ctx context.Context, args map[string]any) (any, er
 	return fmt.Sprintf("计算结果: %v", result), nil
 }
 
-// 计算
+// TimeTool 获取当前时间工具
+type TimeTool struct{}
+
+func (t *TimeTool) Name() string        { return "get_current_time" }
+func (t *TimeTool) Description() string { return "获取当前日期和时间" }
+func (t *TimeTool) Parameters() map[string]string {
+	return map[string]string{}
+}
+func (t *TimeTool) Call(ctx context.Context, args map[string]any) (any, error) {
+	return time.Now().Format("2006-01-02 15:04:05"), nil
+}
+
+// 表达式求值器（递归下降，支持括号和正确优先级）
 func evaluate(expr string) (float64, error) {
 	tokens := tokenize(expr)
 	if len(tokens) == 0 {
 		return 0, fmt.Errorf("empty expression")
 	}
-	return parseExpression(tokens)
+	result, _, err := parseExpr(tokens, 0)
+	return result, err
 }
 
 func tokenize(expr string) []string {
@@ -55,6 +61,12 @@ func tokenize(expr string) []string {
 	for _, ch := range expr {
 		switch {
 		case ch == '+' || ch == '-' || ch == '*' || ch == '/':
+			if num.Len() > 0 {
+				tokens = append(tokens, num.String())
+				num.Reset()
+			}
+			tokens = append(tokens, string(ch))
+		case ch == '(' || ch == ')':
 			if num.Len() > 0 {
 				tokens = append(tokens, num.String())
 				num.Reset()
@@ -74,108 +86,82 @@ func tokenize(expr string) []string {
 	return tokens
 }
 
-func parseExpression(tokens []string) (float64, error) {
-	if len(tokens) == 0 {
-		return 0, fmt.Errorf("empty expression")
+func parseExpr(tokens []string, pos int) (float64, int, error) {
+	left, pos, err := parseTerm(tokens, pos)
+	if err != nil {
+		return 0, pos, err
 	}
-
-	values := make([]float64, 0)
-	operators := make([]string, 0)
-
-	for i := range tokens {
-		token := tokens[i]
-		if token == "+" || token == "-" || token == "*" || token == "/" {
-			for len(operators) > 0 && precedence(operators[len(operators)-1]) >= precedence(token) {
-				if err := applyOperator(&values, operators[len(operators)-1]); err != nil {
-					return 0, err
-				}
-				operators = operators[:len(operators)-1]
-			}
-			operators = append(operators, token)
+	for pos < len(tokens) {
+		op := tokens[pos]
+		if op != "+" && op != "-" {
+			break
+		}
+		pos++
+		right, nextPos, err := parseTerm(tokens, pos)
+		if err != nil {
+			return 0, nextPos, err
+		}
+		if op == "+" {
+			left += right
 		} else {
-			num, err := strconv.ParseFloat(token, 64)
-			if err != nil {
-				return 0, err
+			left -= right
+		}
+		pos = nextPos
+	}
+	return left, pos, nil
+}
+
+func parseTerm(tokens []string, pos int) (float64, int, error) {
+	left, pos, err := parseFactor(tokens, pos)
+	if err != nil {
+		return 0, pos, err
+	}
+	for pos < len(tokens) {
+		op := tokens[pos]
+		if op != "*" && op != "/" {
+			break
+		}
+		pos++
+		right, nextPos, err := parseFactor(tokens, pos)
+		if err != nil {
+			return 0, nextPos, err
+		}
+		if op == "*" {
+			left *= right
+		} else {
+			if right == 0 {
+				return 0, nextPos, fmt.Errorf("division by zero")
 			}
-			values = append(values, num)
+			left /= right
 		}
+		pos = nextPos
 	}
+	return left, pos, nil
+}
 
-	for len(operators) > 0 {
-		if err := applyOperator(&values, operators[len(operators)-1]); err != nil {
-			return 0, err
+func parseFactor(tokens []string, pos int) (float64, int, error) {
+	if pos >= len(tokens) {
+		return 0, pos, fmt.Errorf("unexpected end of expression")
+	}
+	if tokens[pos] == "(" {
+		pos++
+		result, nextPos, err := parseExpr(tokens, pos)
+		if err != nil {
+			return 0, nextPos, err
 		}
-		operators = operators[:len(operators)-1]
-	}
-
-	if len(values) != 1 {
-		return 0, fmt.Errorf("invalid expression")
-	}
-	return values[0], nil
-}
-
-func precedence(op string) int {
-	switch op {
-	case "*", "/":
-		return 2
-	case "+", "-":
-		return 1
-	default:
-		return 0
-	}
-}
-
-func applyOperator(values *[]float64, op string) error {
-	if len(*values) < 2 {
-		return fmt.Errorf("not enough operands")
-	}
-	b := (*values)[len(*values)-1]
-	*values = (*values)[:len(*values)-1]
-	a := (*values)[len(*values)-1]
-	*values = (*values)[:len(*values)-1]
-
-	var result float64
-	switch op {
-	case "+":
-		result = a + b
-	case "-":
-		result = a - b
-	case "*":
-		result = a * b
-	case "/":
-		if b == 0 {
-			return fmt.Errorf("division by zero")
+		if nextPos >= len(tokens) || tokens[nextPos] != ")" {
+			return 0, nextPos, fmt.Errorf("mismatched parentheses")
 		}
-		result = a / b
-	default:
-		return fmt.Errorf("unknown operator: %s", op)
+		return result, nextPos + 1, nil
 	}
-	*values = append(*values, result)
-	return nil
+	num, err := strconv.ParseFloat(tokens[pos], 64)
+	if err != nil {
+		return 0, pos, fmt.Errorf("invalid number: %s", tokens[pos])
+	}
+	return num, pos + 1, nil
 }
 
-// 时间 tool 实现
-type TimeTool struct{}
-
-func (t *TimeTool) Name() string {
-	return "get_current_time"
-}
-
-func (t *TimeTool) Description() string {
-	return "获取当前时间"
-}
-
-func (t *TimeTool) Parameters() map[string]string {
-	return map[string]string{}
-}
-
-func (t *TimeTool) Call(ctx context.Context, args map[string]any) (any, error) {
-	return time.Now().Format(time.RFC3339), nil
-}
-
-// 调用工具 main
 func main() {
-	// 获得 llm
 	providerName := llmlib.ProviderDoubao
 	apiKey := os.Getenv(llmlib.DOUBAO_API_KEY)
 	if apiKey == "" {
@@ -186,6 +172,7 @@ func main() {
 	if baseURL == "" {
 		baseURL = llmlib.DOUBAO_BASEURL
 	}
+	modelName := llmlib.DOUBAO_DEFAULT_MODEL
 
 	p, err := llmlib.NewProvider(providerName)
 	if err != nil {
@@ -193,50 +180,53 @@ func main() {
 		return
 	}
 
-	// 创建工具注册表
 	toolSet := llmlib.NewRegistryToolSet()
-	// 注册两个工具
 	toolSet.Register(&CalculatorTool{})
 	toolSet.Register(&TimeTool{})
 
-	// 配置 agent 默认预算配置（防止超预算）
 	budget := llmlib.DefaultAgentBudgetConfig()
-	// 可以覆盖默认配置
-	budget.MaxSteps = 5
+	budget.MaxSteps = 10
 
-	// 创建 agent = 供应商 + 具体模型 + toolSet + prompt
-	// modelName := "doubao-seed-2-0-code-preview-260215"
-	modelName := llmlib.DOUBAO_DEFAULT_MODEL
 	agent := llmlib.New(p, modelName, toolSet,
-		llmlib.WithSystemPrompt("你是一个能调用工具的 AI 助手。需要计算或查询时间时请调用工具。"),
+		llmlib.WithSystemPrompt("你是一个严格按用户目标执行任务的 AI 助手。如果目标包含计算和查询时间等多个子任务，必须分别调用 calculator 和 get_current_time 工具获取真实结果，然后汇总给出最终答案。"),
 		llmlib.WithAgentBudgetConfig(budget),
 		llmlib.WithAgentAPIKey(apiKey),
 		llmlib.WithAgentBaseURL(baseURL),
 	)
 
-	// 13 & now()
 	goal := "计算 3+5*2 的结果，然后告诉我现在的时间"
 
 	fmt.Printf("Agent 目标: %s\n", goal)
 	fmt.Println("--- 事件流 ---")
 
-	// TODO 失败！！！
 	events, err := agent.Run(context.Background(), goal)
 	if err != nil {
-		fmt.Printf("Agent 运行失败: %v\n", err)
+		fmt.Printf("Agent 启动失败: %v\n", err)
 		return
 	}
 
 	for event := range events {
 		switch event.Type {
+		case llmlib.EventStepStart:
+			fmt.Printf("[Step %d 开始] %s\n", event.Step, event.Text)
+		case llmlib.EventStepEnd:
+			fmt.Printf("[Step %d 结束] %s\n", event.Step, event.Text)
+
+		case llmlib.EventModelCall:
+			fmt.Printf("[模型调用] %s\n", event.Text)
+		case llmlib.EventModelResponse:
+			fmt.Printf("[模型返回] %s\n", event.Text)
+
 		case llmlib.EventThought:
-			fmt.Printf("[思考 Step %d] %s\n", event.Step, event.Text)
-		case llmlib.EventToolCall:
-			fmt.Printf("[工具调用 Step %d] %s(%s)\n", event.Step, event.Tool, event.Args)
-		case llmlib.EventToolResult:
-			fmt.Printf("[工具结果 Step %d] %s: %s\n", event.Step, event.Tool, event.Text)
-		case llmlib.EventAnswerDelta:
+			fmt.Printf("[思考] %s\n", event.Text)
+		case llmlib.EventAnswer:
 			fmt.Printf("[答案] %s\n", event.Text)
+
+		case llmlib.EventToolCall:
+			fmt.Printf("[工具调用] %s(%s)\n", event.Tool, event.Args)
+		case llmlib.EventToolResult:
+			fmt.Printf("[工具结果] %s: %s\n", event.Tool, event.Text)
+
 		case llmlib.EventError:
 			fmt.Printf("[错误] %s\n", event.Text)
 		case llmlib.EventDone:
