@@ -17,17 +17,17 @@ import (
 type ErrorCategory string
 
 const (
-	ErrCategoryNetwork        ErrorCategory = "network"        // 网络问题（超时、DNS、连接失败等）
-	ErrCategoryAuth           ErrorCategory = "auth"           // 授权问题（API Key 无效、权限不足等）
-	ErrCategoryRateLimited    ErrorCategory = "rate_limited"   // 限流（请求过于频繁、配额耗尽等）
-	ErrCategoryModel          ErrorCategory = "model"          // 模型本身出错（生成失败、格式错误等）
-	ErrCategoryTool           ErrorCategory = "tool"           // 工具执行失败（参数错误、工具不存在等）
-	ErrCategoryToolNotFound   ErrorCategory = "tool_not_found"
-	ErrCategoryTimeout        ErrorCategory = "timeout"        // 超时错误
-	ErrCategoryCanceled       ErrorCategory = "canceled"       // 上下文取消错误
-	ErrCategoryNotFound       ErrorCategory = "not_found"      // 资源不存在错误
-	ErrCategoryProviderError  ErrorCategory = "provider_error" // Provider 错误
-	ErrCategoryUnknown        ErrorCategory = "unknown"        // 未知错误，兜底分类
+	ErrCategoryNetwork       ErrorCategory = "network"      // 网络问题（超时、DNS、连接失败等）
+	ErrCategoryAuth          ErrorCategory = "auth"         // 授权问题（API Key 无效、权限不足等）
+	ErrCategoryRateLimited   ErrorCategory = "rate_limited" // 限流（请求过于频繁、配额耗尽等）
+	ErrCategoryModel         ErrorCategory = "model"        // 模型本身出错（生成失败、格式错误等）
+	ErrCategoryTool          ErrorCategory = "tool"         // 工具执行失败（参数错误、工具不存在等）
+	ErrCategoryToolNotFound  ErrorCategory = "tool_not_found"
+	ErrCategoryTimeout       ErrorCategory = "timeout"        // 超时错误
+	ErrCategoryCanceled      ErrorCategory = "canceled"       // 上下文取消错误
+	ErrCategoryNotFound      ErrorCategory = "not_found"      // 资源不存在错误
+	ErrCategoryProviderError ErrorCategory = "provider_error" // Provider 错误
+	ErrCategoryUnknown       ErrorCategory = "unknown"        // 未知错误，兜底分类
 )
 
 // AgentError 是 Agent 运行时的统一错误类型，包含分类信息以便调用方采取合适策略。
@@ -128,7 +128,7 @@ func ClassifyError(err error, statusCode int) (ErrorCategory, bool) {
 // 返回: 最终错误，如果成功则返回 nil
 func RetryWithBackoff(baseDelay, maxDelay time.Duration, maxRetries int, fn func() error) error {
 	delay := baseDelay
-	for i := 0; i < maxRetries; i++ {
+	for i := range maxRetries {
 		if err := fn(); err == nil {
 			return nil
 		}
