@@ -42,6 +42,12 @@ func (r *Registry) Register(tool Tool) {
 	r.tools[tool.Name()] = tool
 }
 
+// RegisterTyped 注册一个 TypedTool 到注册表，提供类型安全的注册方式。
+// 与 Register 功能相同，但保留泛型类型信息，适合在初始化阶段批量注册。
+func RegisterTyped[TInput, TOutput any](r *Registry, tool *TypedTool[TInput, TOutput]) {
+	r.tools[tool.Name()] = tool
+}
+
 // Get 根据工具名称查找工具。
 // 返回工具和是否找到。
 func (r *Registry) Get(name string) (Tool, bool) {

@@ -13,6 +13,6 @@ func TestGenerate(t *testing.T) {
 
 	s := Generate(GetWeatherArgs{})
 
-	t.Log("结果：", s)
+	t.Logf("结果：%v", *s)
 	t.Log("通过测试")
 }

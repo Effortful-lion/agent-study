@@ -23,6 +23,7 @@ const (
 	ErrCategoryModel         ErrorCategory = "model"        // 模型本身出错（生成失败、格式错误等）
 	ErrCategoryTool          ErrorCategory = "tool"         // 工具执行失败（参数错误、工具不存在等）
 	ErrCategoryToolNotFound  ErrorCategory = "tool_not_found"
+	ErrCategoryValidation    ErrorCategory = "validation"     // 参数验证失败（字段缺失、格式错误等）
 	ErrCategoryTimeout       ErrorCategory = "timeout"        // 超时错误
 	ErrCategoryCanceled      ErrorCategory = "canceled"       // 上下文取消错误
 	ErrCategoryNotFound      ErrorCategory = "not_found"      // 资源不存在错误
