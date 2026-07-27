@@ -188,7 +188,7 @@ func main() {
 	budget.MaxSteps = 10
 
 	agent := llmlib.New(p, modelName, toolSet,
-		llmlib.WithSystemPrompt("你是一个严格按用户目标执行任务的 AI 助手。如果目标包含计算和查询时间等多个子任务，必须分别调用 calculator 和 get_current_time 工具获取真实结果，然后汇总给出最终答案。"),
+		llmlib.WithSystemPrompt("你是一个严格按用户目标执行任务的 AI 助手。汇总给出最终答案。"),
 		llmlib.WithAgentBudgetConfig(budget),
 		llmlib.WithAgentAPIKey(apiKey),
 		llmlib.WithAgentBaseURL(baseURL),
