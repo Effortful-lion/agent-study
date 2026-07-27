@@ -10,6 +10,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/Effortful-lion/agent-study/llmLib/lg"
 )
 
 // providerMeta 描述单个服务商在环境变量装配阶段需要的元信息。
@@ -206,12 +208,12 @@ func LoadAllWithEnv(envPath string) ([]LLMService, error) {
 	}
 
 	if useSimpleConfig && len(configuredProviders) > 0 {
-		fmt.Fprintf(os.Stderr, "[llmlib] 提示: 当前启用单个 provider (%s)，使用简化配置模式\n", configuredProviders[0])
-		fmt.Fprintf(os.Stderr, "[llmlib] 简化配置: API_KEY, BASE_URL, MODEL\n")
-		fmt.Fprintf(os.Stderr, "[llmlib] 如需多 provider，请设置 provider_API_KEY (如 DOUBAO_API_KEY, DEEPSEEK_API_KEY) 启用多个服务商\n")
+		lg.Frame.Infof("当前启用单个 provider (%s)，使用简化配置模式", configuredProviders[0])
+		lg.Frame.Info("简化配置: API_KEY, BASE_URL, MODEL")
+		lg.Frame.Info("如需多 provider，请设置 provider_API_KEY (如 DOUBAO_API_KEY, DEEPSEEK_API_KEY) 启用多个服务商")
 	} else if !useSimpleConfig && len(configuredProviders) > 0 {
-		fmt.Fprintf(os.Stderr, "[llmlib] 提示: 当前启用多个 provider (%s)，使用具名配置模式\n", strings.Join(configuredProviders, ", "))
-		fmt.Fprintf(os.Stderr, "[llmlib] 具名配置: provider_API_KEY, provider_BASE_URL, provider_MODEL\n")
+		lg.Frame.Infof("当前启用多个 provider (%s)，使用具名配置模式", strings.Join(configuredProviders, ", "))
+		lg.Frame.Info("具名配置: provider_API_KEY, provider_BASE_URL, provider_MODEL")
 	}
 
 	return services, nil

@@ -7,6 +7,8 @@ package llmlib
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/Effortful-lion/agent-study/llmLib/lg"
 )
 
 // parseOpenAIDelta 从 OpenAI 风格的 SSE data 负载中提取文本增量和结束状态。
@@ -36,6 +38,7 @@ func parseOpenAIDeltaWithTools(data []byte) (delta string, done bool, toolCalls 
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(data, &chunk); err != nil {
+		lg.Frame.Error("parseData: 解析 OpenAI 流事件失败", lg.Fields{"error": err})
 		return "", false, nil, fmt.Errorf("解析 OpenAI 流事件: %w", err)
 	}
 	if len(chunk.Choices) == 0 {

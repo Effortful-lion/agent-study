@@ -1,3 +1,8 @@
+// 文件职责：
+// - 提供基于 JSON Schema 的 Tool 接口实现示例（Calculator、Time）。
+// - 同时保留旧的参数接口供向后兼容。
+// - 推荐使用 NewTool 创建新工具，自动将 map[string]string 转为 JSON Schema。
+
 package llmlib
 
 import (
@@ -9,6 +14,127 @@ import (
 	"time"
 )
 
+// ============================================================================
+// JSONSchemaTool — 使用 JSON Schema 定义参数的标准 Tool 实现
+// ============================================================================
+
+// JSONSchemaTool 是使用 JSON Schema 定义参数的 Tool 实现。
+// Parameters() 返回 json.RawMessage（即 JSON Schema），由 ToolDefs() 直接使用。
+type JSONSchemaTool struct {
+	name        string
+	description string
+	parameters  json.RawMessage
+	callFn      func(ctx context.Context, args map[string]any) (any, error)
+}
+
+// Name 返回工具名称。
+func (t *JSONSchemaTool) Name() string { return t.name }
+
+// Description 返回工具描述。
+func (t *JSONSchemaTool) Description() string { return t.description }
+
+// Parameters 返回 JSON Schema 格式的参数定义。
+func (t *JSONSchemaTool) Parameters() map[string]string { return nil }
+
+// ParametersSchema 返回 JSON Schema 格式的参数定义（新接口）。
+func (t *JSONSchemaTool) ParametersSchema() json.RawMessage { return t.parameters }
+
+// Call 执行工具调用。
+func (t *JSONSchemaTool) Call(ctx context.Context, args map[string]any) (any, error) {
+	return t.callFn(ctx, args)
+}
+
+// SchemaTool 接口：支持 JSON Schema 参数定义的工具。
+type SchemaTool interface {
+	Tool
+	ParametersSchema() json.RawMessage
+}
+
+// NewJSONSchemaTool 创建一个使用 JSON Schema 定义参数的工具。
+// name: 工具名称
+// description: 工具描述
+// parametersJSON: JSON Schema 格式的参数定义
+// callFn: 工具执行函数
+func NewJSONSchemaTool(name, description string, parametersJSON json.RawMessage, callFn func(ctx context.Context, args map[string]any) (any, error)) *JSONSchemaTool {
+	return &JSONSchemaTool{
+		name:        name,
+		description: description,
+		parameters:  parametersJSON,
+		callFn:      callFn,
+	}
+}
+
+// ============================================================================
+// ToolDefs — 改进版，自动检测 SchemaTool
+// ============================================================================
+
+// BuildToolDefs 从 Registry 构建 ToolDef 列表，自动检测 SchemaTool 接口。
+// 优先使用 ParametersSchema() 返回的 JSON Schema，fallback 到 Parameters() 的 map[string]string。
+// 对 map[string]string 格式的参数，自动转换为合法的 JSON Schema。
+func BuildToolDefs(registry *Registry) []ToolDef {
+	if registry == nil {
+		return nil
+	}
+	var defs []ToolDef
+	for _, tool := range registry.tools {
+		var params json.RawMessage
+		if st, ok := tool.(SchemaTool); ok {
+			params = st.ParametersSchema()
+		} else {
+			params = mapToJSONSchema(tool.Parameters())
+		}
+		defs = append(defs, ToolDef{
+			Type: "function",
+			Function: ToolFunction{
+				Name:        tool.Name(),
+				Description: tool.Description(),
+				Parameters:  params,
+			},
+		})
+	}
+	return defs
+}
+
+// mapToJSONSchema 将 map[string]string 格式的参数定义转换为合法的 JSON Schema。
+// 输入格式：{"expression": "string, 数学表达式"}
+// 输出格式：{"type":"object","properties":{"expression":{"type":"string","description":"数学表达式"}},"required":["expression"]}
+func mapToJSONSchema(params map[string]string) json.RawMessage {
+	properties := make(map[string]any)
+	required := make([]string, 0, len(params))
+
+	for name, desc := range params {
+		// 解析类型和描述：格式为 "type, description" 或 "type"
+		propType := "string"
+		propDesc := desc
+
+		if idx := strings.Index(desc, ","); idx > 0 {
+			propType = strings.TrimSpace(desc[:idx])
+			propDesc = strings.TrimSpace(desc[idx+1:])
+		}
+
+		properties[name] = map[string]any{
+			"type":        propType,
+			"description": propDesc,
+		}
+		required = append(required, name)
+	}
+
+	schema := map[string]any{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+
+	result, _ := json.Marshal(schema)
+	return result
+}
+
+// ============================================================================
+// CalculatorTool — 计算器工具
+// ============================================================================
+
 type CalculatorTool struct{}
 
 func (t *CalculatorTool) Name() string {
@@ -19,39 +145,25 @@ func (t *CalculatorTool) Description() string {
 	return "执行数学运算，支持加减乘除"
 }
 
-func (t *CalculatorTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{
-		"type": "object",
-		"properties": {
-			"expression": {
-				"type": "string",
-				"description": "数学表达式，如 \"2+3*4\""
-			}
-		},
-		"required": ["expression"]
-	}`)
+func (t *CalculatorTool) Parameters() map[string]string {
+	return map[string]string{
+		"expression": "string, 数学表达式，如 \"2+3*4\"",
+	}
 }
 
-func (t *CalculatorTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
-	var params struct {
-		Expression string `json:"expression"`
+func (t *CalculatorTool) Call(ctx context.Context, args map[string]any) (any, error) {
+	expr, ok := args["expression"].(string)
+	if !ok {
+		return nil, fmt.Errorf("缺少 expression 参数")
 	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-
-	result, err := evaluateExpression(params.Expression)
+	result, err := evaluateExpression(expr)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	return fmt.Sprintf("计算结果: %v", result), nil
 }
 
 func evaluateExpression(expr string) (float64, error) {
-	return evalSimpleExpression(expr)
-}
-
-func evalSimpleExpression(expr string) (float64, error) {
 	tokens := tokenize(expr)
 	if len(tokens) == 0 {
 		return 0, fmt.Errorf("empty expression")
@@ -178,45 +290,9 @@ func parsePrimary(tokens []string, pos int) (float64, int, error) {
 	return num, pos, nil
 }
 
-func precedence(op string) int {
-	switch op {
-	case "*", "/":
-		return 2
-	case "+", "-":
-		return 1
-	default:
-		return 0
-	}
-}
-
-func applyOperator(values *[]float64, op string) error {
-	if len(*values) < 2 {
-		return fmt.Errorf("not enough operands")
-	}
-	b := (*values)[len(*values)-1]
-	*values = (*values)[:len(*values)-1]
-	a := (*values)[len(*values)-1]
-	*values = (*values)[:len(*values)-1]
-
-	var result float64
-	switch op {
-	case "+":
-		result = a + b
-	case "-":
-		result = a - b
-	case "*":
-		result = a * b
-	case "/":
-		if b == 0 {
-			return fmt.Errorf("division by zero")
-		}
-		result = a / b
-	default:
-		return fmt.Errorf("unknown operator: %s", op)
-	}
-	*values = append(*values, result)
-	return nil
-}
+// ============================================================================
+// TimeTool — 时间工具
+// ============================================================================
 
 type TimeTool struct{}
 
@@ -228,14 +304,10 @@ func (t *TimeTool) Description() string {
 	return "获取当前时间"
 }
 
-func (t *TimeTool) Parameters() json.RawMessage {
-	return json.RawMessage(`{
-		"type": "object",
-		"properties": {},
-		"required": []
-	}`)
+func (t *TimeTool) Parameters() map[string]string {
+	return map[string]string{}
 }
 
-func (t *TimeTool) Call(ctx context.Context, args json.RawMessage) (string, error) {
+func (t *TimeTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	return time.Now().Format(time.RFC3339), nil
 }

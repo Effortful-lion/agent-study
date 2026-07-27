@@ -10,7 +10,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+
+	"github.com/Effortful-lion/agent-study/llmLib/lg"
 )
+
+// 注意：json 用于 BuildArgs，reflect 用于 StructToMap
 
 // Tool 接口定义 Agent 可调用的工具，实现此接口即可被 Agent 使用。
 // 工具是 Agent 的感知和行动接口，通过工具调用外部服务和能力。
@@ -46,26 +50,16 @@ func (r *Registry) Get(name string) (Tool, bool) {
 }
 
 // ToolDefs 返回所有已注册工具的定义列表，用于传递给模型。
+// 自动检测 SchemaTool 接口，优先使用 JSON Schema 格式的参数定义。
 func (r *Registry) ToolDefs() []ToolDef {
-	var defs []ToolDef
-	for _, tool := range r.tools {
-		params, _ := json.Marshal(tool.Parameters())
-		defs = append(defs, ToolDef{
-			Type: "function",
-			Function: ToolFunction{
-				Name:        tool.Name(),
-				Description: tool.Description(),
-				Parameters:  params,
-			},
-		})
-	}
-	return defs
+	return BuildToolDefs(r)
 }
 
 // Call 调用指定名称的工具，自动解析参数。
 func (r *Registry) Call(ctx context.Context, name string, args map[string]any) (any, error) {
 	tool, ok := r.Get(name)
 	if !ok {
+		lg.Frame.Error("工具不存在", lg.Fields{"tool": name})
 		return nil, NewAgentError(ErrCategoryToolNotFound, fmt.Sprintf("工具 %s 不存在", name), nil, false)
 	}
 	return tool.Call(ctx, args)
@@ -81,9 +75,11 @@ func BuildArgs(argsJSON string) (map[string]any, error) {
 		var argsStr string
 		if json.Unmarshal([]byte(argsJSON), &argsStr) == nil {
 			if json.Unmarshal([]byte(argsStr), &args) != nil {
+				lg.Frame.Error("BuildArgs: 参数解析失败", lg.Fields{"args": argsJSON, "error": err})
 				return nil, NewAgentError(ErrCategoryTool, "参数解析失败: "+err.Error(), err, false)
 			}
 		} else {
+			lg.Frame.Error("BuildArgs: 参数解析失败", lg.Fields{"args": argsJSON, "error": err})
 			return nil, NewAgentError(ErrCategoryTool, "参数解析失败: "+err.Error(), err, false)
 		}
 	}

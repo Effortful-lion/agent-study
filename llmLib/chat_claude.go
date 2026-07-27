@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/Effortful-lion/agent-study/llmLib/lg"
 )
 
 // ClaudeChat 使用 Claude 消息接口发起同步请求，并转换为统一响应结构。
@@ -48,11 +50,13 @@ func ClaudeChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message,
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
+		lg.Frame.Error("claude: 序列化请求失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
+		lg.Frame.Error("claude: 创建 HTTP 请求失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -62,12 +66,14 @@ func ClaudeChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message,
 	client := NewClient()
 	resp, err := client.Do(req)
 	if err != nil {
+		lg.Frame.Error("claude: HTTP 请求失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
+		lg.Frame.Error("claude: 非 2xx 响应", lg.Fields{"status": resp.StatusCode})
 		return nil, fmt.Errorf("chat failed: status=%d body=%s", resp.StatusCode, string(b))
 	}
 
@@ -87,6 +93,7 @@ func ClaudeChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message,
 		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		lg.Frame.Error("claude: 解析响应失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
@@ -151,12 +158,14 @@ func ClaudeChatStreamWithTools(ctx context.Context, cfg LLMConfig, messages []Me
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
+		lg.Frame.Error("claude: 流式请求序列化失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	url := cfg.BaseURL + "/v1/messages"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
+		lg.Frame.Error("claude: 流式创建 HTTP 请求失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("new request: %w", err)
 	}
 

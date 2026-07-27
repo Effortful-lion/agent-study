@@ -3,6 +3,8 @@ package llmlib
 import (
 	"context"
 	"fmt"
+
+	"github.com/Effortful-lion/agent-study/llmLib/lg"
 )
 
 type Provider interface {
@@ -36,6 +38,7 @@ func NewProvider(name string) (Provider, error) {
 	case ProviderQwen:
 		return NewQwenProvider(), nil
 	default:
+		lg.Frame.Error("未知 provider", lg.Fields{"name": name})
 		return nil, fmt.Errorf("unknown provider: %s", name)
 	}
 }

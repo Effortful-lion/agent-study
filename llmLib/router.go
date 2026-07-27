@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Effortful-lion/agent-study/llmLib/lg"
 )
 
 // Strategy 表示 Router 选择服务商尝试顺序时使用的调度策略。
@@ -110,8 +112,10 @@ func (a *RouterAdapter) ChatWithTools(ctx context.Context, cfg LLMConfig, messag
 			if err == nil {
 				return resp, nil
 			}
+			lg.Frame.Warn("router: provider 工具调用失败，尝试下一个", lg.Fields{"provider": service.Provider.Name(), "error": err})
 		}
 	}
+	lg.Frame.Error("router: 没有可用的 tool call provider")
 	return nil, fmt.Errorf("no tool call provider available in router")
 }
 
@@ -122,8 +126,10 @@ func (a *RouterAdapter) ChatStreamWithTools(ctx context.Context, cfg LLMConfig, 
 			if err == nil {
 				return stream, nil
 			}
+			lg.Frame.Warn("router: provider 流式工具调用失败，尝试下一个", lg.Fields{"provider": service.Provider.Name(), "error": err})
 		}
 	}
+	lg.Frame.Error("router: 没有可用的 tool call stream provider")
 	return nil, fmt.Errorf("no tool call provider available in router")
 }
 
@@ -146,6 +152,7 @@ func (r *Router) Chat(ctx context.Context, messages []Message) (*RouteResult, er
 
 	if len(r.services) == 0 {
 		recordSnapshot()
+		lg.Frame.Error("router: 没有可用服务")
 		return nil, errors.New("router has no services")
 	}
 
@@ -173,12 +180,15 @@ func (r *Router) Chat(ctx context.Context, messages []Message) (*RouteResult, er
 	}
 
 	recordSnapshot()
-	return nil, fmt.Errorf("all providers failed:\n%s", formatRouteErrors(errs))
+	err := fmt.Errorf("all providers failed:\n%s", formatRouteErrors(errs))
+	lg.Frame.Error("router: 所有 provider 均失败", lg.Fields{"errors": formatRouteErrors(errs)})
+	return nil, err
 }
 
 // ChatStream 按当前策略依次尝试流式服务，命中首个有效输出后继续消费至结束。
 func (r *Router) ChatStream(ctx context.Context, messages []Message) (<-chan RouteStreamChunk, error) {
 	if len(r.services) == 0 {
+		lg.Frame.Error("router: ChatStream 没有可用服务")
 		return nil, errors.New("router has no services")
 	}
 
@@ -268,7 +278,9 @@ func (r *Router) ChatStream(ctx context.Context, messages []Message) (<-chan Rou
 			}
 		}
 
-		sendRouteStreamErr(ctx, out, fmt.Errorf("all providers failed:\n%s", formatRouteErrors(errs)))
+		streamErr := fmt.Errorf("all providers failed:\n%s", formatRouteErrors(errs))
+		lg.Frame.Error("router: ChatStream 所有 provider 均失败", lg.Fields{"errors": formatRouteErrors(errs)})
+		sendRouteStreamErr(ctx, out, streamErr)
 	}()
 
 	return out, nil

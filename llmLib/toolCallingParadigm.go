@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+
+	"github.com/Effortful-lion/agent-study/llmLib/lg"
 )
 
 // ToolCallingParadigm 接口定义工具调用范式的基本操作：检测和解析。
@@ -34,6 +36,7 @@ func (p *FunctionCallingParadigm) Parse(content string) ([]ToolCall, error) {
 	var calls []ToolCall
 	var data map[string]any
 	if err := json.Unmarshal([]byte(content), &data); err != nil {
+		lg.Frame.Error("FunctionCalling: 工具调用格式解析失败", lg.Fields{"error": err})
 		return nil, NewAgentError(ErrCategoryModel, "工具调用格式解析失败", err, false)
 	}
 	if toolCalls, ok := data["tool_calls"].([]any); ok {

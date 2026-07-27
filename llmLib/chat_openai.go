@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/Effortful-lion/agent-study/llmLib/lg"
 )
 
 func normalizeArgs(args json.RawMessage) json.RawMessage {
@@ -44,12 +46,14 @@ func OpenAIChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message,
 	}
 	body, err := json.Marshal(chatReq)
 	if err != nil {
+		lg.Frame.Error("openai: 序列化请求失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	url := cfg.BaseURL + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
+		lg.Frame.Error("openai: 创建 HTTP 请求失败", lg.Fields{"error": err, "url": url})
 		return nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -59,12 +63,14 @@ func OpenAIChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message,
 	client := NewClient()
 	resp, err := client.Do(req)
 	if err != nil {
+		lg.Frame.Error("openai: HTTP 请求失败", lg.Fields{"error": err, "url": url, "model": cfg.Model})
 		return nil, fmt.Errorf("do request: %w\nURL: %s\nModel: %s", err, url, cfg.Model)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
+		lg.Frame.Error("openai: 非 2xx 响应", lg.Fields{"status": resp.StatusCode, "url": url})
 		return nil, fmt.Errorf("chat failed: status=%d body=%s", resp.StatusCode, string(b))
 	}
 
@@ -81,6 +87,7 @@ func OpenAIChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message,
 					} `json:"function"`
 				} `json:"tool_calls"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
 			PromptTokens     int `json:"prompt_tokens"`
@@ -88,9 +95,11 @@ func OpenAIChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message,
 		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		lg.Frame.Error("openai: 解析响应失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 	if len(raw.Choices) == 0 {
+		lg.Frame.Error("openai: 响应 choices 为空")
 		return nil, errors.New("parse response: choices is empty")
 	}
 
@@ -107,6 +116,7 @@ func OpenAIChatWithTools(ctx context.Context, cfg LLMConfig, messages []Message,
 	return &ChatResponse{
 		Content:      raw.Choices[0].Message.Content,
 		ToolCalls:    toolCalls,
+		FinishReason: raw.Choices[0].FinishReason,
 		InputTokens:  raw.Usage.PromptTokens,
 		OutputTokens: raw.Usage.CompletionTokens,
 	}, nil
@@ -131,11 +141,13 @@ func OpenAIChatStreamWithTools(ctx context.Context, cfg LLMConfig, messages []Me
 
 	body, err := json.Marshal(chatReq)
 	if err != nil {
+		lg.Frame.Error("openai: 流式请求序列化失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
+		lg.Frame.Error("openai: 流式创建 HTTP 请求失败", lg.Fields{"error": err, "url": url})
 		return nil, fmt.Errorf("new request: %w", err)
 	}
 

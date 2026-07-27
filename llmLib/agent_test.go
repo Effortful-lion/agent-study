@@ -221,6 +221,10 @@ func TestLevels(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Mock Provider and Tool for Agent tests
+// ============================================================================
+
 type mockProvider struct {
 	responses []*ChatResponse
 	idx       int
@@ -262,6 +266,10 @@ func (t *mockTool) Call(ctx context.Context, args map[string]any) (any, error) {
 	return t.result, nil
 }
 
+// ============================================================================
+// Agent 集成测试
+// ============================================================================
+
 func TestAgent_Run_WithToolCall(t *testing.T) {
 	mockTool := &mockTool{
 		name:        "get_time",
@@ -292,20 +300,40 @@ func TestAgent_Run_WithToolCall(t *testing.T) {
 	var finalAnswer string
 	for event := range events {
 		eventTypes = append(eventTypes, event.Type)
-		if event.Type == EventAnswerDelta {
+		if event.Type == EventAnswer {
 			finalAnswer = event.Text
 		}
 	}
 
-	expectedTypes := []EventType{EventToolCall, EventToolResult, EventAnswerDelta, EventDone}
-	if len(eventTypes) != len(expectedTypes) {
-		t.Errorf("event types len = %v, want %v. got: %v", len(eventTypes), len(expectedTypes), eventTypes)
+	// 新的事件流包含更多事件类型：StepStart, ModelCall, ToolCall, ToolResult, StepEnd, Answer, Done
+	hasToolCall := false
+	hasToolResult := false
+	hasAnswer := false
+	hasDone := false
+	for _, et := range eventTypes {
+		switch et {
+		case EventToolCall:
+			hasToolCall = true
+		case EventToolResult:
+			hasToolResult = true
+		case EventAnswer:
+			hasAnswer = true
+		case EventDone:
+			hasDone = true
+		}
 	}
 
-	for i, expected := range expectedTypes {
-		if eventTypes[i] != expected {
-			t.Errorf("event type[%d] = %v, want %v", i, eventTypes[i], expected)
-		}
+	if !hasToolCall {
+		t.Error("expected EventToolCall")
+	}
+	if !hasToolResult {
+		t.Error("expected EventToolResult")
+	}
+	if !hasAnswer {
+		t.Error("expected EventAnswer")
+	}
+	if !hasDone {
+		t.Error("expected EventDone")
 	}
 
 	if finalAnswer != "当前时间是 2024-01-01 12:00:00" {
@@ -334,14 +362,27 @@ func TestAgent_Run_DirectAnswer(t *testing.T) {
 	var finalAnswer string
 	for event := range events {
 		eventTypes = append(eventTypes, event.Type)
-		if event.Type == EventAnswerDelta {
+		if event.Type == EventAnswer {
 			finalAnswer = event.Text
 		}
 	}
 
-	expectedTypes := []EventType{EventAnswerDelta, EventDone}
-	if len(eventTypes) != len(expectedTypes) {
-		t.Errorf("event types len = %v, want %v. got: %v", len(eventTypes), len(expectedTypes), eventTypes)
+	hasAnswer := false
+	hasDone := false
+	for _, et := range eventTypes {
+		switch et {
+		case EventAnswer:
+			hasAnswer = true
+		case EventDone:
+			hasDone = true
+		}
+	}
+
+	if !hasAnswer {
+		t.Error("expected EventAnswer")
+	}
+	if !hasDone {
+		t.Error("expected EventDone")
 	}
 
 	if finalAnswer != "直接回答" {
@@ -367,6 +408,118 @@ func (m *mockReActProvider) Chat(ctx context.Context, cfg LLMConfig, messages []
 
 func (m *mockReActProvider) ChatStream(ctx context.Context, cfg LLMConfig, messages []Message) (<-chan StreamChunk, error) {
 	return nil, nil
+}
+
+func TestAgent_Run_MultipleTools(t *testing.T) {
+	calcTool := &mockTool{
+		name:        "calculator",
+		description: "执行数学运算",
+		result:      "13",
+	}
+	timeTool := &mockTool{
+		name:        "get_current_time",
+		description: "获取当前日期和时间",
+		result:      "2024-01-01 12:00:00",
+	}
+
+	mock := &mockProvider{
+		responses: []*ChatResponse{
+			{ToolCalls: []ToolCall{{ID: "call_1", Name: "calculator", Args: json.RawMessage(`{"expression":"3+5*2"}`)}}},
+			{ToolCalls: []ToolCall{{ID: "call_2", Name: "get_current_time", Args: json.RawMessage(`{}`)}}},
+			{Content: "3+5*2 的结果是 13，现在时间是 2024-01-01 12:00:00"},
+		},
+	}
+
+	registry := NewRegistryToolSet()
+	registry.Register(calcTool)
+	registry.Register(timeTool)
+	agent := New(mock, "test-model", registry)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	events, err := agent.Run(ctx, "计算 3+5*2 的结果，然后告诉我现在的时间")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var toolCalls []string
+	var finalAnswer string
+	for event := range events {
+		if event.Type == EventToolCall {
+			toolCalls = append(toolCalls, event.Tool)
+		}
+		if event.Type == EventAnswer {
+			finalAnswer = event.Text
+		}
+	}
+
+	if len(toolCalls) != 2 {
+		t.Errorf("expected 2 tool calls, got %v", toolCalls)
+	}
+	if toolCalls[0] != "calculator" || toolCalls[1] != "get_current_time" {
+		t.Errorf("expected [calculator, get_current_time], got %v", toolCalls)
+	}
+	if finalAnswer != "3+5*2 的结果是 13，现在时间是 2024-01-01 12:00:00" {
+		t.Errorf("final answer = %v", finalAnswer)
+	}
+}
+
+func TestAgent_Run_MultipleTools_AgentForcesContinue(t *testing.T) {
+	calcTool := &mockTool{
+		name:        "calculator",
+		description: "执行数学运算",
+		result:      "13",
+	}
+	timeTool := &mockTool{
+		name:        "get_current_time",
+		description: "获取当前日期和时间",
+		result:      "2024-01-01 12:00:00",
+	}
+
+	// 模拟模型在第一个工具结果后偷懒直接返回答案，框架应追加提示要求继续。
+	mock := &mockProvider{
+		responses: []*ChatResponse{
+			{ToolCalls: []ToolCall{{ID: "call_1", Name: "calculator", Args: json.RawMessage(`{"expression":"3+5*2"}`)}}},
+			{Content: "3+5*2 的结果是 13"},
+			{ToolCalls: []ToolCall{{ID: "call_2", Name: "get_current_time", Args: json.RawMessage(`{}`)}}},
+			{Content: "3+5*2 的结果是 13，现在时间是 2024-01-01 12:00:00"},
+		},
+	}
+
+	registry := NewRegistryToolSet()
+	registry.Register(calcTool)
+	registry.Register(timeTool)
+	agent := New(mock, "test-model", registry)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	events, err := agent.Run(ctx, "计算 3+5*2 的结果，然后告诉我现在的时间")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var toolCalls []string
+	var finalAnswer string
+	for event := range events {
+		if event.Type == EventToolCall {
+			toolCalls = append(toolCalls, event.Tool)
+		}
+		if event.Type == EventAnswer {
+			finalAnswer = event.Text
+		}
+	}
+
+	if len(toolCalls) != 2 {
+		t.Errorf("expected 2 tool calls, got %v", toolCalls)
+	}
+	if toolCalls[0] != "calculator" || toolCalls[1] != "get_current_time" {
+		t.Errorf("expected [calculator, get_current_time], got %v", toolCalls)
+	}
+	if finalAnswer != "3+5*2 的结果是 13，现在时间是 2024-01-01 12:00:00" {
+		t.Errorf("final answer = %v", finalAnswer)
+	}
 }
 
 func TestAgent_Run_ReActFallback(t *testing.T) {
@@ -403,20 +556,45 @@ func TestAgent_Run_ReActFallback(t *testing.T) {
 		if event.Type == EventThought {
 			thoughts = append(thoughts, event.Text)
 		}
-		if event.Type == EventAnswerDelta {
+		if event.Type == EventAnswer {
 			finalAnswer = event.Text
 		}
 	}
 
-	expectedTypes := []EventType{EventThought, EventToolCall, EventToolResult, EventAnswerDelta, EventDone}
-	if len(eventTypes) != len(expectedTypes) {
-		t.Errorf("event types len = %v, want %v. got: %v", len(eventTypes), len(expectedTypes), eventTypes)
+	hasThought := false
+	hasToolCall := false
+	hasToolResult := false
+	hasAnswer := false
+	hasDone := false
+	for _, et := range eventTypes {
+		switch et {
+		case EventThought:
+			hasThought = true
+		case EventToolCall:
+			hasToolCall = true
+		case EventToolResult:
+			hasToolResult = true
+		case EventAnswer:
+			hasAnswer = true
+		case EventDone:
+			hasDone = true
+		}
 	}
 
-	for i, expected := range expectedTypes {
-		if eventTypes[i] != expected {
-			t.Errorf("event type[%d] = %v, want %v", i, eventTypes[i], expected)
-		}
+	if !hasThought {
+		t.Error("expected EventThought")
+	}
+	if !hasToolCall {
+		t.Error("expected EventToolCall")
+	}
+	if !hasToolResult {
+		t.Error("expected EventToolResult")
+	}
+	if !hasAnswer {
+		t.Error("expected EventAnswer")
+	}
+	if !hasDone {
+		t.Error("expected EventDone")
 	}
 
 	if len(thoughts) == 0 || !strings.Contains(thoughts[0], "我需要获取当前时间") {

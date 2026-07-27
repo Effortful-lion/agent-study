@@ -1,7 +1,7 @@
 // 文件职责：
-// - 实现 Agent 状态机抽象，定义四个阶段：Thinking、Acting、Done、Error。
-// - 定义 State 结构体作为一次 Agent 运行的完整快照，支持 JSON 序列化用于持久化。
-// - 实现 Store 接口和 FileStore，支持会话状态的保存和恢复。
+// - 定义 Agent 状态机：四个阶段 Thinking/Acting/Done/Error。
+// - State 结构体是一次 Agent 运行的完整快照，支持 JSON 序列化用于持久化。
+// - Store 接口和 FileStore 实现会话状态的保存和恢复。
 
 package llmlib
 
@@ -13,73 +13,94 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Effortful-lion/agent-study/llmLib/lg"
 )
 
-// Phase 表示 Agent 的运行阶段，是状态机的核心状态。
+// Phase 表示 Agent 的运行阶段。
+// 状态转换图：
+//
+//	     ┌──────────┐
+//	     │ thinking │ ←──────────┐
+//	     └────┬─────┘            │
+//	有工具调用 │  无工具调用       │
+//	          ↓                  │
+//	     ┌──────────┐            │
+//	     │ acting   │ ──────────┘
+//	     └────┬─────┘  (执行完工具后)
+//	      出错  │
+//	          ↓
+//	     ┌──────────┐
+//	     │  error   │
+//	     └──────────┘
+//
+//	     ┌──────────┐
+//	     │   done   │  (最终答案)
+//	     └──────────┘
 type Phase string
 
 const (
-	PhaseThinking Phase = "thinking" // 调用模型，等待它决定下一步
-	PhaseActing   Phase = "acting"   // 模型决定要用工具，代码执行工具
-	PhaseDone     Phase = "done"     // 模型给出最终答案，正常结束
-	PhaseError    Phase = "error"    // 遇到不可恢复错误，异常结束
+	PhaseThinking Phase = "thinking" // 调用模型，等待决策
+	PhaseActing   Phase = "acting"   // 执行工具调用
+	PhaseDone     Phase = "done"     // 模型给出最终答案
+	PhaseError    Phase = "error"    // 不可恢复错误
 )
 
-// State 是一次 Agent 运行的完整快照，刻意设计成可 JSON 序列化。
-// Agent 的"记忆"就是 Messages 列表，模型之所以能"记得"前几轮做了什么，
-// 是因为每轮调用时都把完整历史重新发给它。
+// State 是一次 Agent 运行的完整快照，可 JSON 序列化。
+// 核心思想：Agent 的"记忆"就是 Messages 列表。
 type State struct {
-	Goal         string            `json:"goal"`     // 用户给的目标
-	Messages     []Message         `json:"messages"` // 完整对话历史，含工具结果——这是 Agent 的"记忆"
-	Step         int               `json:"step"`     // 已执行的步数
-	Phase        Phase             `json:"phase"`    // 当前运行阶段
-	Answer       string            `json:"answer,omitempty"`        // 终态时的最终答案
+	Goal         string            `json:"goal"`                    // 用户目标
+	Messages     []Message         `json:"messages"`                // 完整对话历史
+	Step         int               `json:"step"`                    // 已执行步数
+	Phase        Phase             `json:"phase"`                   // 当前阶段
+	Answer       string            `json:"answer,omitempty"`        // 最终答案
 	Usage        Usage             `json:"usage"`                   // 累计 token 用量
-	ActionCounts map[string]int    `json:"action_counts,omitempty"` // 重复动作检测，防止死循环
-	StartedAt    time.Time         `json:"started_at"`              // 本轮开始时间
-	UpdatedAt    time.Time         `json:"updated_at"`              // 最近一次状态更新时间
-	Metadata     map[string]string `json:"metadata,omitempty"`      // 预留给业务侧扩展
-	GoalAdded    bool              `json:"goal_added,omitempty"`    // 目标是否已添加到消息中
+	ActionCounts map[string]int    `json:"action_counts,omitempty"` // 重复动作检测
+	StartedAt    time.Time         `json:"started_at"`              // 开始时间
+	UpdatedAt    time.Time         `json:"updated_at"`              // 最近更新时间
+	Metadata     map[string]string `json:"metadata,omitempty"`      // 业务侧扩展 + 内部暂存
+	GoalAdded    bool              `json:"goal_added,omitempty"`    // 目标是否已添加到消息
 }
 
-// Store 接口定义状态持久化的基本操作，可实现为文件存储、数据库存储等。
+// Store 定义状态持久化接口。
 type Store interface {
 	Save(ctx context.Context, sessionID string, st *State) error
 	Load(ctx context.Context, sessionID string) (*State, error)
 }
 
-// FileStore 是基于文件系统的状态持久化实现，每个会话对应一个 JSON 文件。
+// FileStore 是基于文件系统的状态持久化实现。
 type FileStore struct{ dir string }
 
-// NewFileStore 创建一个新的 FileStore，dir 为存储目录。
 func NewFileStore(dir string) *FileStore { return &FileStore{dir: dir} }
 
-// Save 保存状态到文件，会话 ID 作为文件名。
 func (store *FileStore) Save(_ context.Context, sessionID string, state *State) error {
 	if store == nil {
 		return fmt.Errorf("FileStore 未初始化")
 	}
 	if err := os.MkdirAll(store.dir, 0o700); err != nil {
+		lg.Frame.Error("FileStore: 创建目录失败", lg.Fields{"dir": store.dir, "error": err})
 		return err
 	}
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
+		lg.Frame.Error("FileStore: 序列化失败", lg.Fields{"session": sessionID, "error": err})
 		return err
 	}
 	return os.WriteFile(store.path(sessionID), raw, 0o600)
 }
 
-// Load 从文件加载状态，会话 ID 作为文件名。
 func (store *FileStore) Load(_ context.Context, sessionID string) (*State, error) {
 	if store == nil {
 		return nil, fmt.Errorf("FileStore 未初始化")
 	}
 	raw, err := os.ReadFile(store.path(sessionID))
 	if err != nil {
+		lg.Frame.Error("FileStore: 读取失败", lg.Fields{"session": sessionID, "error": err})
 		return nil, fmt.Errorf("加载会话 %s 失败: %w", sessionID, err)
 	}
 	var state State
 	if err := json.Unmarshal(raw, &state); err != nil {
+		lg.Frame.Error("FileStore: 反序列化失败", lg.Fields{"session": sessionID, "error": err})
 		return nil, err
 	}
 	if state.ActionCounts == nil {
@@ -88,7 +109,6 @@ func (store *FileStore) Load(_ context.Context, sessionID string) (*State, error
 	return &state, nil
 }
 
-// path 生成会话文件路径，确保文件名安全。
 func (store *FileStore) path(sessionID string) string {
 	name := filepath.Base(sessionID)
 	if name == "." || name == string(filepath.Separator) || name == "" {
@@ -97,14 +117,16 @@ func (store *FileStore) path(sessionID string) string {
 	return filepath.Join(store.dir, name+".json")
 }
 
-// checkpoint 保存状态检查点，先清理空消息，再保存到内存和持久化存储。
+// checkpoint 保存状态检查点。
 func (agent *Agent) checkpoint(ctx context.Context, state *State) {
 	state.Messages = dropEmptyAssistantMessages(state.Messages)
 	agent.memory = state
 	if agent.store == nil || agent.sessionID == "" {
 		return
 	}
-	_ = agent.store.Save(ctx, agent.sessionID, state)
+	if err := agent.store.Save(ctx, agent.sessionID, state); err != nil {
+		lg.Frame.Error("checkpoint: 保存状态失败", lg.Fields{"error": err, "session": agent.sessionID})
+	}
 }
 
 // dropEmptyAssistantMessages 移除空的助手消息，减少上下文长度。

@@ -28,6 +28,7 @@ type ChatRequest struct {
 type ChatResponse struct {
 	Content      string     `json:"content"`
 	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
+	FinishReason string     `json:"finish_reason"`
 	InputTokens  int        `json:"input_tokens"`
 	OutputTokens int        `json:"output_tokens"`
 }

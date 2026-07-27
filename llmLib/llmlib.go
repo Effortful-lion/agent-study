@@ -8,6 +8,8 @@ package llmlib
 import (
 	"context"
 	"fmt"
+
+	"github.com/Effortful-lion/agent-study/llmLib/lg"
 )
 
 // Chat 按服务商名称发起一次同步聊天调用，并返回统一响应结构。
@@ -15,6 +17,7 @@ func Chat(ctx context.Context, providerName string, apiKey string, messages []Me
 	// 先解析服务商实现，避免配置装配完成后才发现 provider 不存在。
 	p, err := NewProvider(providerName)
 	if err != nil {
+		lg.Frame.Error("Chat: 创建 provider 失败", lg.Fields{"provider": providerName, "error": err})
 		return nil, fmt.Errorf("chat: %w", err)
 	}
 
@@ -40,6 +43,7 @@ func Chat(ctx context.Context, providerName string, apiKey string, messages []Me
 func ChatStream(ctx context.Context, providerName string, apiKey string, messages []Message, opts ...ChatOption) (<-chan StreamChunk, error) {
 	p, err := NewProvider(providerName)
 	if err != nil {
+		lg.Frame.Error("ChatStream: 创建 provider 失败", lg.Fields{"provider": providerName, "error": err})
 		return nil, fmt.Errorf("chat stream: %w", err)
 	}
 
