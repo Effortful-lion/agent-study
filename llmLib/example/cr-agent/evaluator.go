@@ -47,8 +47,8 @@ feedback 字段说明需要补充哪些维度的审查或哪些方面需要改�
 
 func parseEvaluationResult(content string) (evaluationResult, error) {
 	var result evaluationResult
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return evaluationResult{}, fmt.Errorf("parse evaluation: %w", err)
+	if err := json.Unmarshal([]byte(extractJSON(content)), &result); err != nil {
+		return evaluationResult{}, fmt.Errorf("parse evaluation: %w\nraw: %s", err, content)
 	}
 	return result, nil
 }

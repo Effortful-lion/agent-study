@@ -33,8 +33,8 @@ func planReview(ctx context.Context, p llmlib.Provider, cfg llmlib.LLMConfig, co
 
 func parseReviewPlan(content string) (reviewPlan, error) {
 	var plan reviewPlan
-	if err := json.Unmarshal([]byte(content), &plan); err != nil {
-		return reviewPlan{}, fmt.Errorf("parse review plan: %w", err)
+	if err := json.Unmarshal([]byte(extractJSON(content)), &plan); err != nil {
+		return reviewPlan{}, fmt.Errorf("parse review plan: %w\nraw: %s", err, content)
 	}
 	return plan, nil
 }

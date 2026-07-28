@@ -4,10 +4,33 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	llmlib "github.com/Effortful-lion/agent-study/llmLib"
 )
+
+func extractJSON(content string) string {
+	content = strings.TrimSpace(content)
+
+	if strings.HasPrefix(content, "```") {
+		if idx := strings.Index(content, "\n"); idx != -1 {
+			content = content[idx+1:]
+		}
+		if end := strings.LastIndex(content, "```"); end != -1 {
+			content = content[:end]
+		}
+		content = strings.TrimSpace(content)
+	}
+
+	firstBrace := strings.Index(content, "{")
+	lastBrace := strings.LastIndex(content, "}")
+	if firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace {
+		content = content[firstBrace : lastBrace+1]
+	}
+
+	return content
+}
 
 type reviewFinding struct {
 	Dimension string `json:"dimension"`
@@ -84,8 +107,8 @@ func reviewDimension(ctx context.Context, p llmlib.Provider, cfg llmlib.LLMConfi
 	}
 
 	var finding reviewFinding
-	if err := json.Unmarshal([]byte(out.Content), &finding); err != nil {
-		return reviewFinding{}, err
+	if err := json.Unmarshal([]byte(extractJSON(out.Content)), &finding); err != nil {
+		return reviewFinding{}, fmt.Errorf("parse review: %w\nraw: %s", err, out.Content)
 	}
 
 	finding.Dimension = dimension

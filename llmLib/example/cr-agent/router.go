@@ -67,8 +67,8 @@ func looksLikeCode(input string) bool {
 
 func parseIntentResult(content string) (intentResult, error) {
 	var result intentResult
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return intentResult{}, fmt.Errorf("parse intent: %w", err)
+	if err := json.Unmarshal([]byte(extractJSON(content)), &result); err != nil {
+		return intentResult{}, fmt.Errorf("parse intent: %w\nraw: %s", err, content)
 	}
 	return result, nil
 }
