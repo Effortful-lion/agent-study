@@ -1,5 +1,6 @@
 // 文件职责：
 // - 实现 OpenAI 兼容协议的同步和流式聊天调用。
+// - 通过 openai_adapter.go 中的边界映射层保持与 Anthropic 适配器的对称性。
 // - 供 OpenAI 及兼容该协议的多家服务商共享复用。
 
 package provider
@@ -18,6 +19,9 @@ import (
 	"github.com/Effortful-lion/agent-study/llmLib/transport"
 )
 
+// normalizeArgs 处理 tool_calls 中 arguments 字段可能是 JSON 字符串或 JSON 对象的兼容性问题。
+// 某些 provider 返回的 arguments 是 JSON 字符串（如 "{\"key\":\"value\"}"），
+// 需要先解字符串再重新序列化为标准 JSON。
 func normalizeArgs(args json.RawMessage) json.RawMessage {
 	if len(args) == 0 {
 		return args
@@ -39,13 +43,14 @@ func OpenAIChat(ctx context.Context, cfg core.LLMConfig, messages []core.Message
 }
 
 // OpenAIChatWithTools 使用 OpenAI 兼容聊天接口发起带工具调用的同步请求。
+//
+// 边界映射流程：
+//  1. 统一格式直接透传为 OpenAI 兼容请求（统一格式本身就是 OpenAI 兼容的）
+//  2. 发送 HTTP 请求到 OpenAI Chat Completions API
+//  3. OpenAI 原生响应 → 统一 ChatResponse（tool_calls→ToolCall）
 func OpenAIChatWithTools(ctx context.Context, cfg core.LLMConfig, messages []core.Message, tools []core.ToolDef) (*core.ChatResponse, error) {
-	chatReq := core.ChatRequest{
-		Model:    cfg.Model,
-		Messages: messages,
-		Stream:   false,
-		Tools:    tools,
-	}
+	chatReq := toOpenAIRequest(cfg, messages, tools, false)
+
 	body, err := json.Marshal(chatReq)
 	if err != nil {
 		lg.Frame.Error("openai: 序列化请求失败", lg.Fields{"error": err})
@@ -76,26 +81,8 @@ func OpenAIChatWithTools(ctx context.Context, cfg core.LLMConfig, messages []cor
 		return nil, fmt.Errorf("chat failed: status=%d body=%s", resp.StatusCode, string(b))
 	}
 
-	var raw struct {
-		Choices []struct {
-			Message struct {
-				Content   string `json:"content"`
-				ToolCalls []struct {
-					ID       string `json:"id"`
-					Type     string `json:"type"`
-					Function struct {
-						Name      string          `json:"name"`
-						Arguments json.RawMessage `json:"arguments"`
-					} `json:"function"`
-				} `json:"tool_calls"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-		} `json:"usage"`
-	}
+	// 步骤 3：边界映射 - OpenAI 原生响应 → 统一格式
+	var raw openaiRawResponse
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		lg.Frame.Error("openai: 解析响应失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("parse response: %w", err)
@@ -105,23 +92,7 @@ func OpenAIChatWithTools(ctx context.Context, cfg core.LLMConfig, messages []cor
 		return nil, errors.New("parse response: choices is empty")
 	}
 
-	var toolCalls []core.ToolCall
-	for _, tc := range raw.Choices[0].Message.ToolCalls {
-		args := normalizeArgs(tc.Function.Arguments)
-		toolCalls = append(toolCalls, core.ToolCall{
-			ID:   tc.ID,
-			Name: tc.Function.Name,
-			Args: args,
-		})
-	}
-
-	return &core.ChatResponse{
-		Content:      raw.Choices[0].Message.Content,
-		ToolCalls:    toolCalls,
-		FinishReason: raw.Choices[0].FinishReason,
-		InputTokens:  raw.Usage.PromptTokens,
-		OutputTokens: raw.Usage.CompletionTokens,
-	}, nil
+	return parseOpenAIResponse(raw), nil
 }
 
 // OpenAIChatStream 使用 OpenAI 兼容流接口发起请求，并把 SSE 事件转换为统一流式片段。
@@ -134,12 +105,7 @@ func OpenAIChatStreamWithTools(ctx context.Context, cfg core.LLMConfig, messages
 	stream := make(chan core.StreamChunk)
 
 	url := cfg.BaseURL + "/chat/completions"
-	chatReq := core.ChatRequest{
-		Model:    cfg.Model,
-		Messages: messages,
-		Stream:   true,
-		Tools:    tools,
-	}
+	chatReq := toOpenAIRequest(cfg, messages, tools, true)
 
 	body, err := json.Marshal(chatReq)
 	if err != nil {

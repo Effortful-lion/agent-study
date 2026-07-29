@@ -1,5 +1,6 @@
 // 文件职责：
 // - 实现 Anthropic Claude 原生消息协议的同步和流式调用。
+// - 通过 anthropic_adapter.go 中的边界映射层，将统一消息格式转换为 Anthropic 原生格式。
 // - 供 Claude provider 在统一接口下接入非 OpenAI 兼容的上游服务。
 
 package provider
@@ -23,31 +24,30 @@ func ClaudeChat(ctx context.Context, cfg core.LLMConfig, messages []core.Message
 }
 
 // ClaudeChatWithTools 使用 Claude 消息接口发起带工具调用的同步请求。
+//
+// 边界映射流程：
+//  1. 统一消息 → Anthropic 原生格式（system→顶层字段、ToolRole→tool_result、ToolCalls→tool_use）
+//  2. 统一 ToolDef → Anthropic tools 格式（{type,function} → {name,description,input_schema}）
+//  3. 发送 HTTP 请求到 Anthropic Messages API
+//  4. Anthropic 原生响应 → 统一 ChatResponse（tool_use→ToolCall）
 func ClaudeChatWithTools(ctx context.Context, cfg core.LLMConfig, messages []core.Message, tools []core.ToolDef) (*core.ChatResponse, error) {
-	type claudeTool struct {
-		Name        string          `json:"name"`
-		Description string          `json:"description"`
-		InputSchema json.RawMessage `json:"input_schema"`
-	}
-	var claudeTools []claudeTool
-	for _, t := range tools {
-		claudeTools = append(claudeTools, claudeTool{
-			Name:        t.Function.Name,
-			Description: t.Function.Description,
-			InputSchema: t.Function.Parameters,
-		})
-	}
+	// 步骤 1-2：边界映射 - 统一格式 → Anthropic 原生格式
+	systemPrompt, anthMessages := toAnthropicMessages(messages)
+	anthTools := toAnthropicTools(tools)
 
+	// 构建 Anthropic 请求体
 	reqBody := struct {
-		Model    string        `json:"model"`
-		Messages []core.Message `json:"messages"`
-		Tools    []claudeTool  `json:"tools,omitempty"`
+		Model     string             `json:"model"`
+		System    string             `json:"system,omitempty"`
+		Messages  []anthropicMessage `json:"messages"`
+		Tools     []anthropicTool    `json:"tools,omitempty"`
+		MaxTokens int                `json:"max_tokens"`
 	}{
-		Model:    cfg.Model,
-		Messages: messages,
-	}
-	if len(claudeTools) > 0 {
-		reqBody.Tools = claudeTools
+		Model:     cfg.Model,
+		System:    systemPrompt,
+		Messages:  anthMessages,
+		Tools:     anthTools,
+		MaxTokens: 4096,
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -64,6 +64,7 @@ func ClaudeChatWithTools(ctx context.Context, cfg core.LLMConfig, messages []cor
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("x-api-key", cfg.APIKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
 
 	client := transport.NewClient()
 	resp, err := client.Do(req)
@@ -79,46 +80,14 @@ func ClaudeChatWithTools(ctx context.Context, cfg core.LLMConfig, messages []cor
 		return nil, fmt.Errorf("chat failed: status=%d body=%s", resp.StatusCode, string(b))
 	}
 
-	var raw struct {
-		Content []struct {
-			Type    string `json:"type"`
-			Text    string `json:"text"`
-			ToolUse *struct {
-				ID    string          `json:"id"`
-				Name  string          `json:"name"`
-				Input json.RawMessage `json:"input"`
-			} `json:"tool_use"`
-		} `json:"content"`
-		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
-	}
+	// 步骤 4：边界映射 - Anthropic 原生响应 → 统一格式
+	var raw anthropicRawResponse
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		lg.Frame.Error("claude: 解析响应失败", lg.Fields{"error": err})
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	var content string
-	var toolCalls []core.ToolCall
-	for _, c := range raw.Content {
-		if c.Type == "text" {
-			content += c.Text
-		} else if c.Type == "tool_use" && c.ToolUse != nil {
-			toolCalls = append(toolCalls, core.ToolCall{
-				ID:   c.ToolUse.ID,
-				Name: c.ToolUse.Name,
-				Args: c.ToolUse.Input,
-			})
-		}
-	}
-
-	return &core.ChatResponse{
-		Content:      content,
-		ToolCalls:    toolCalls,
-		InputTokens:  raw.Usage.InputTokens,
-		OutputTokens: raw.Usage.OutputTokens,
-	}, nil
+	return parseAnthropicResponse(raw), nil
 }
 
 // ClaudeChatStream 使用 Claude 的 SSE 流接口持续输出文本增量。
@@ -127,35 +96,30 @@ func ClaudeChatStream(ctx context.Context, cfg core.LLMConfig, messages []core.M
 }
 
 // ClaudeChatStreamWithTools 使用 Claude 的 SSE 流接口发起带工具调用的请求。
+//
+// 边界映射流程与 ClaudeChatWithTools 相同，但使用流式传输。
+// 流式事件中 tool_use 通过 content_block_start 事件传递，文本增量通过 content_block_delta 事件传递。
 func ClaudeChatStreamWithTools(ctx context.Context, cfg core.LLMConfig, messages []core.Message, tools []core.ToolDef) (<-chan core.StreamChunk, error) {
 	stream := make(chan core.StreamChunk)
 
-	type claudeTool struct {
-		Name        string          `json:"name"`
-		Description string          `json:"description"`
-		InputSchema json.RawMessage `json:"input_schema"`
-	}
-	var claudeTools []claudeTool
-	for _, t := range tools {
-		claudeTools = append(claudeTools, claudeTool{
-			Name:        t.Function.Name,
-			Description: t.Function.Description,
-			InputSchema: t.Function.Parameters,
-		})
-	}
+	// 边界映射 - 统一格式 → Anthropic 原生格式
+	systemPrompt, anthMessages := toAnthropicMessages(messages)
+	anthTools := toAnthropicTools(tools)
 
 	reqBody := struct {
-		Model    string        `json:"model"`
-		Messages []core.Message `json:"messages"`
-		Tools    []claudeTool  `json:"tools,omitempty"`
-		Stream   bool          `json:"stream"`
+		Model     string             `json:"model"`
+		System    string             `json:"system,omitempty"`
+		Messages  []anthropicMessage `json:"messages"`
+		Tools     []anthropicTool    `json:"tools,omitempty"`
+		MaxTokens int                `json:"max_tokens"`
+		Stream    bool               `json:"stream"`
 	}{
-		Model:    cfg.Model,
-		Messages: messages,
-		Stream:   true,
-	}
-	if len(claudeTools) > 0 {
-		reqBody.Tools = claudeTools
+		Model:     cfg.Model,
+		System:    systemPrompt,
+		Messages:  anthMessages,
+		Tools:     anthTools,
+		MaxTokens: 4096,
+		Stream:    true,
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -174,6 +138,7 @@ func ClaudeChatStreamWithTools(ctx context.Context, cfg core.LLMConfig, messages
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("x-api-key", cfg.APIKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
 
 	go func() {
 		defer close(stream)
@@ -204,12 +169,8 @@ func ClaudeChatStreamWithTools(ctx context.Context, cfg core.LLMConfig, messages
 					Text string `json:"text"`
 				} `json:"delta"`
 				ContentBlock struct {
-					Type    string `json:"type"`
-					ToolUse *struct {
-						ID    string          `json:"id"`
-						Name  string          `json:"name"`
-						Input json.RawMessage `json:"input"`
-					} `json:"tool_use"`
+					Type    string            `json:"type"`
+					ToolUse *anthropicToolUse `json:"tool_use"`
 				} `json:"content_block"`
 			}
 			if err := json.Unmarshal(data, &raw); err != nil {
@@ -221,7 +182,7 @@ func ClaudeChatStreamWithTools(ctx context.Context, cfg core.LLMConfig, messages
 				case <-ctx.Done():
 					return ctx.Err()
 				}
-			} else if raw.Type == "content_block" && raw.ContentBlock.Type == "tool_use" && raw.ContentBlock.ToolUse != nil {
+			} else if raw.Type == "content_block_start" && raw.ContentBlock.Type == "tool_use" && raw.ContentBlock.ToolUse != nil {
 				select {
 				case stream <- core.StreamChunk{ToolCalls: []core.ToolCall{{
 					ID:   raw.ContentBlock.ToolUse.ID,
