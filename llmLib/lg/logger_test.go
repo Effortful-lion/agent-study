@@ -299,3 +299,226 @@ func TestCallerLocation(t *testing.T) {
 		t.Errorf("missing caller file, got: %s", output)
 	}
 }
+
+func TestModuleLogger_DefaultDisabled(t *testing.T) {
+	m := Module("test_default_disabled")
+	if m.Enabled() {
+		t.Error("module should be disabled by default")
+	}
+	if m.BufferSize() != 0 {
+		t.Error("buffer should be empty when disabled")
+	}
+}
+
+func TestModuleLogger_Info(t *testing.T) {
+	var buf bytes.Buffer
+	m := Module("test_info")
+	m.writer = NewConsoleWriter(&buf, LevelDebug)
+
+	m.Info("hello from module")
+	if !strings.Contains(buf.String(), "hello from module") {
+		t.Error("log should appear on console")
+	}
+	if !strings.Contains(buf.String(), "[test_info]") {
+		t.Error("log should include module name")
+	}
+}
+
+func TestModuleLogger_BufferingWhenEnabled(t *testing.T) {
+	var buf bytes.Buffer
+	m := Module("test_buffering")
+	m.writer = NewConsoleWriter(&buf, LevelDebug)
+
+	m.Enable()
+	m.Info("buffered message")
+
+	if m.BufferSize() != 1 {
+		t.Errorf("buffer should have 1 entry, got %d", m.BufferSize())
+	}
+
+	m.Disable()
+	m.Info("not buffered")
+	if m.BufferSize() != 1 {
+		t.Errorf("buffer should still have 1 entry, got %d", m.BufferSize())
+	}
+}
+
+func TestModuleLogger_WriteNow(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "module_test.log")
+
+	m := Module("test_writenow")
+	m.writer = NewConsoleWriter(os.Stdout, LevelDebug)
+
+	m.SetPath(path)
+	m.Info("first write")
+	m.Info("second write")
+
+	if err := m.WriteNow(); err != nil {
+		t.Fatalf("WriteNow failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file failed: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "first write") {
+		t.Error("file should contain first write")
+	}
+	if !strings.Contains(content, "second write") {
+		t.Error("file should contain second write")
+	}
+
+	if m.BufferSize() != 0 {
+		t.Error("buffer should be empty after WriteNow")
+	}
+}
+
+func TestModuleLogger_SetPath(t *testing.T) {
+	m := Module("test_setpath")
+	defaultPath := m.Path()
+	if defaultPath != "./test_setpath.log" {
+		t.Errorf("expected default path ./test_setpath.log, got %s", defaultPath)
+	}
+
+	m.SetPath("/absolute/path/custom.log")
+	if m.Path() != "/absolute/path/custom.log" {
+		t.Errorf("path not updated: %s", m.Path())
+	}
+	if !m.Enabled() {
+		t.Error("SetPath should implicitly enable the module")
+	}
+}
+
+func TestModuleLogger_AutoCreateDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "a", "b", "c")
+	path := filepath.Join(dir, "deep.log")
+
+	m := Module("test_autocreate")
+	m.SetPath(path)
+	m.Info("deep directory test")
+
+	if err := m.WriteNow(); err != nil {
+		t.Fatalf("WriteNow should auto-create dir: %v", err)
+	}
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Error("log file should exist after WriteNow")
+	}
+}
+
+func TestModuleLogger_ClearBuffer(t *testing.T) {
+	m := Module("test_clear")
+	m.Enable()
+	m.Info("to be cleared")
+	if m.BufferSize() != 1 {
+		t.Errorf("expected 1 entry, got %d", m.BufferSize())
+	}
+
+	m.ClearBuffer()
+	if m.BufferSize() != 0 {
+		t.Errorf("expected 0 entries after clear, got %d", m.BufferSize())
+	}
+}
+
+func TestModuleLogger_Levels(t *testing.T) {
+	var buf bytes.Buffer
+	m := Module("test_levels")
+	m.writer = NewConsoleWriter(&buf, LevelDebug)
+
+	m.Debug("debug msg")
+	if !strings.Contains(buf.String(), "debug msg") {
+		t.Error("debug should pass when level=Debug")
+	}
+
+	buf.Reset()
+	m.Warn("warn msg")
+	if !strings.Contains(buf.String(), "warn msg") {
+		t.Error("warn should pass")
+	}
+
+	buf.Reset()
+	m.Error("error msg")
+	if !strings.Contains(buf.String(), "error msg") {
+		t.Error("error should pass")
+	}
+}
+
+func TestModuleLogger_LevelFilter(t *testing.T) {
+	var buf bytes.Buffer
+	m := Module("test_levelfilter")
+	m.writer = NewConsoleWriter(&buf, LevelWarn)
+
+	m.Debug("debug")
+	m.Info("info")
+	m.Warn("warn")
+	m.Error("error")
+
+	output := buf.String()
+	if strings.Contains(output, "debug") || strings.Contains(output, "info") {
+		t.Error("debug/info should be filtered")
+	}
+	if !strings.Contains(output, "warn") {
+		t.Error("warn should pass")
+	}
+	if !strings.Contains(output, "error") {
+		t.Error("error should pass")
+	}
+}
+
+func TestModuleLogger_Singleton(t *testing.T) {
+	m1 := Module("test_singleton")
+	m2 := Module("test_singleton")
+
+	m1.SetPath("/tmp/singleton.log")
+	if m2.Path() != "/tmp/singleton.log" {
+		t.Error("modules with same name should be the same instance")
+	}
+}
+
+func TestModuleLogger_With(t *testing.T) {
+	var buf bytes.Buffer
+	m := Module("test_with")
+	m.writer = NewConsoleWriter(&buf, LevelInfo)
+
+	sub := m.With(Fields{"request_id": "abc123"})
+	sub.Info("sub module log")
+
+	output := buf.String()
+	if !strings.Contains(output, "request_id=abc123") {
+		t.Error("should contain fixed field")
+	}
+}
+
+func TestModuleLogger_EmptyBufferWriteNow(t *testing.T) {
+	m := Module("test_empty_write")
+	err := m.WriteNow()
+	if err != nil {
+		t.Errorf("WriteNow on empty buffer should not error: %v", err)
+	}
+}
+
+func TestModuleLogger_FormatFunctions(t *testing.T) {
+	var buf bytes.Buffer
+	m := Module("test_format")
+	m.writer = NewConsoleWriter(&buf, LevelInfo)
+
+	m.Infof("user %d logged in from %s", 42, "10.0.0.1")
+	output := buf.String()
+	if !strings.Contains(output, "user 42 logged in from 10.0.0.1") {
+		t.Errorf("unexpected output: %s", output)
+	}
+}
+
+func TestModuleLogger_CallerLocation(t *testing.T) {
+	var buf bytes.Buffer
+	m := Module("test_caller")
+	m.writer = NewConsoleWriter(&buf, LevelDebug)
+
+	m.Debug("caller location test")
+	output := buf.String()
+	if !strings.Contains(output, "logger_test.go") {
+		t.Errorf("missing caller file, got: %s", output)
+	}
+}

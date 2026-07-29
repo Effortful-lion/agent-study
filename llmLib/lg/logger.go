@@ -183,10 +183,7 @@ func Default() *Logger {
 	return defaultLogger
 }
 
-// Module 使用默认 Logger 创建模块子 Logger。
-func Module(module string) *Logger {
-	return defaultLogger.Module(module)
-}
+
 
 // ============================================================================
 // 框架内置日志器
