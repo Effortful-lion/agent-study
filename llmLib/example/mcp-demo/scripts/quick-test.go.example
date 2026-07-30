@@ -1,0 +1,85 @@
+// 文件职责：
+// - 最简单的 MCP 集成测试
+// - 快速验证 Server/Client/Bridge 是否正常工作
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/Effortful-lion/agent-study/llmLib/mcp"
+	"github.com/Effortful-lion/agent-study/llmLib/tool"
+)
+
+func main() {
+	fmt.Println("=== MCP 快速验证 ===\n")
+
+	// 1. 启动 MCP Server
+	fmt.Println("1. 启动 Server...")
+	client, mcpTools, err := mcp.NewBridgedClient(
+		"go",
+		[]string{"run", "server/main.go"},
+	)
+	if err != nil {
+		fmt.Printf("✗ 启动失败: %v\n", err)
+		os.Exit(1)
+	}
+	defer client.Close()
+
+	fmt.Printf("✓ 成功桥接 %d 个工具\n\n", len(mcpTools))
+
+	// 2. 创建 Registry
+	registry := tool.NewRegistryToolSet()
+	for _, t := range mcpTools {
+		registry.Register(t)
+		fmt.Printf("  - %s\n", t.Name())
+	}
+	fmt.Println()
+
+	// 3. 显示工具定义
+	fmt.Println("2. 工具定义:")
+	for _, td := range registry.ToolDefs() {
+		fmt.Printf("  • %s: %s\n", td.Function.Name, td.Function.Description)
+	}
+	fmt.Println()
+
+	// 4. 测试工具调用
+	fmt.Println("3. 测试工具调用:")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	for _, t := range mcpTools {
+		fmt.Printf("  调用 %s...\n", t.Name())
+
+		args := map[string]any{}
+		switch t.Name() {
+		case "get_time":
+			args = map[string]any{"timezone": "Asia/Shanghai"}
+		case "calc":
+			args = map[string]any{"expr": "1+1"}
+		}
+
+		result, err := registry.Call(ctx, t.Name(), args)
+		if err != nil {
+			fmt.Printf("  ✗ 失败: %v\n", err)
+		} else {
+			fmt.Printf("  ✓ 结果: %v\n", result)
+		}
+	}
+
+	// 5. 完成
+	fmt.Println("\n✓ 验证完成！")
+
+	// 等待用户按 Ctrl+C
+	fmt.Println("\n按 Ctrl+C 退出...")
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	fmt.Println("\n再见！")
+}

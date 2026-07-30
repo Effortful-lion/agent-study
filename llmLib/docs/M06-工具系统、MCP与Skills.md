@@ -18,7 +18,7 @@
 
 4. 解释 MCP 的架构、核心原语、JSON-RPC 消息、生命周期、stdio 与 Streamable HTTP 传输；
 
-5. 从零手写一个 MCP stdio Server 和 Client，理解 `initialize`、`tools/list`、`tools/call` 的完整链路，并用 `MCPToolBridge` 把 MCP 工具接进 M04 的 Agent；
+5. 从零手写一个 MCP stdio Server 和 Client，理解 `initialize`、`tools/list`、`tools/call` 的完整链路，并用 `MCPToolBridge` 把 MCP 工具接进example/agent（copy一份为agent-mcp）；
 
 6. 识别 MCP 工具投毒、输出污染、授权和副作用风险；
 

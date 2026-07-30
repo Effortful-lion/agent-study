@@ -1,0 +1,93 @@
+// 文件职责：
+// - 简化版集成示例
+// - 展示如何将 MCP 工具接入 Agent
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/Effortful-lion/agent-study/llmLib/mcp"
+	"github.com/Effortful-lion/agent-study/llmLib/tool"
+)
+
+func main() {
+	fmt.Println("=== MCP 工具桥接演示 ===\n")
+
+	// 1. 启动 MCP Server 并桥接工具
+	fmt.Println("步骤 1: 启动 MCP Server...")
+	client, mcpTools, err := mcp.NewBridgedClient(
+		"go",
+		[]string{"run", "server/main.go"},
+	)
+	if err != nil {
+		fmt.Printf("✗ 启动失败: %v\n", err)
+		os.Exit(1)
+	}
+	defer client.Close()
+
+	fmt.Printf("✓ 成功桥接 %d 个 MCP 工具\n\n", len(mcpTools))
+
+	// 2. 创建 Registry 并注册工具
+	fmt.Println("步骤 2: 注册工具到 Registry...")
+	registry := tool.NewRegistryToolSet()
+
+	for _, mcpTool := range mcpTools {
+		registry.Register(mcpTool)
+		fmt.Printf("  ✓ %s: %s\n", mcpTool.Name(), mcpTool.Description())
+	}
+
+	fmt.Println()
+
+	// 3. 显示工具定义
+	fmt.Println("步骤 3: 工具定义 (供 LLM 使用)...")
+	fmt.Println("以下工具定义会发送给 LLM，让模型知道可用工具：\n")
+
+	for _, td := range registry.ToolDefs() {
+		fmt.Printf("工具名称: %s\n", td.Function.Name)
+		fmt.Printf("工具描述: %s\n", td.Function.Description)
+		fmt.Printf("参数 Schema: %s\n\n", string(td.Function.Parameters))
+	}
+
+	// 4. 直接测试工具调用
+	fmt.Println("步骤 4: 测试工具调用...\n")
+
+	ctx := context.Background()
+
+	for _, mcpTool := range mcpTools {
+		fmt.Printf("调用 %s:\n", mcpTool.Name())
+
+		// 准备参数
+		var args map[string]any
+		switch mcpTool.Name() {
+		case "get_time":
+			args = map[string]any{"timezone": "Asia/Shanghai"}
+		case "calc":
+			args = map[string]any{"expr": "12 * (3 + 4)"}
+		default:
+			args = map[string]any{}
+		}
+
+		// 调用
+		result, err := registry.Call(ctx, mcpTool.Name(), args)
+		if err != nil {
+			fmt.Printf("  ✗ 失败: %v\n\n", err)
+		} else {
+			fmt.Printf("  ✓ 结果: %v\n\n", result)
+		}
+	}
+
+	// 5. 总结
+	fmt.Println("=== 演示完成 ===")
+	fmt.Println("\n关键要点：")
+	fmt.Println("1. MCP 工具通过 BridgeAll() 桥接成本地 tool.Tool")
+	fmt.Println("2. 注册到 Registry 后，Agent 无需感知 MCP 协议")
+	fmt.Println("3. Agent 像调用本地工具一样调用 MCP 工具")
+	fmt.Println("4. 支持多个 MCP Server 同时接入")
+	fmt.Println("\n在 Agent 中使用：")
+	fmt.Println("  agent := agent.New(provider, model, registry)")
+	fmt.Println("  events, _ := agent.Run(ctx, '查询当前时间')")
+	fmt.Println("  // Agent 会自动调用 get_time 工具")
+}
