@@ -80,6 +80,16 @@ func WithComplexQueries(allowed bool) SecureNL2SQLOption {
 	}
 }
 
+// WithNL2SQLAuditCallback 为 NL2SQL 设置审计回调
+func WithNL2SQLAuditCallback(callback func(security.AuditEvent)) SecureNL2SQLOption {
+	return func(n *SecureNL2SQL) {
+		// 创建一个新的 AuditLogger 并设置回调
+		n.auditLogger = security.NewAuditLogger(
+			security.WithEventCallback(callback),
+		)
+	}
+}
+
 // ============================================================================
 // SQL 安全检查（增强版）
 // ============================================================================

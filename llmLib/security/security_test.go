@@ -250,7 +250,7 @@ func TestConfirmationManager(t *testing.T) {
 		return true, "confirmed"
 	})
 
-	allowed, reason := cm.Confirm(context.Background(), "test_tool", nil)
+	allowed, _ := cm.Confirm(context.Background(), "test_tool", nil)
 	if !allowed {
 		t.Error("应允许执行")
 	}
@@ -271,7 +271,6 @@ func TestConfirmationManager(t *testing.T) {
 
 func TestSecurityContext(t *testing.T) {
 	ctx := NewSecurityContext(
-		WithMaxOutputLength(1024),
 		WithConfirmation(func(ctx context.Context, toolName string, args map[string]any) (bool, string) {
 			return true, "ok"
 		}),

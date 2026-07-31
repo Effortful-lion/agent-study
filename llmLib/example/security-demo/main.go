@@ -207,7 +207,7 @@ func example4_SecureNL2SQL() {
 		builtin.WithMaxRows(100),
 		builtin.WithQueryTimeout(3*time.Second),
 		builtin.WithComplexQueries(true), // 允许 JOIN 和子查询
-		builtin.WithAuditCallback(func(event security.AuditEvent) {
+		builtin.WithNL2SQLAuditCallback(func(event security.AuditEvent) {
 			fmt.Printf("[审计] SQL 查询: %s，耗时: %v\n",
 				event.ToolArgs["sql"],
 				event.Duration)
@@ -248,8 +248,6 @@ func example5_SecureMCPBridge() {
 
 	// 注意：此示例需要一个正在运行的 MCP Server
 	// 这里展示配置方式
-
-	ctx := context.Background()
 
 	// 方式 1: 使用工具白名单
 	client, tools, auditLogger, err := mcp.NewSecureBridgedClient(
@@ -372,7 +370,6 @@ func example8_CompleteSecurityContext() {
 
 	// 创建完整的安全上下文
 	secCtx := security.NewSecurityContext(
-		security.WithMaxOutputLength(4096),
 		security.WithConfirmation(func(ctx context.Context, toolName string, args map[string]any) (bool, string) {
 			fmt.Printf("[确认请求] 工具: %s，参数: %v\n", toolName, args)
 			return true, "模拟确认"
@@ -381,6 +378,9 @@ func example8_CompleteSecurityContext() {
 			fmt.Printf("[审计] %s\n", event.ToolName)
 		}),
 	)
+
+	// 如果需要自定义 Sanitizer 配置
+	secCtx.Sanitizer = security.NewSanitizer(security.WithMaxOutputLength(4096))
 
 	// 测试输出净化
 	sanitized := secCtx.Sanitizer.SanitizeToolOutput("查询结果数据")

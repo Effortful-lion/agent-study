@@ -31,12 +31,16 @@ type Sanitizer struct {
 }
 
 // NewSanitizer 创建新的输出净化器
-func NewSanitizer() *Sanitizer {
-	return &Sanitizer{
+func NewSanitizer(opts ...SanitizerOption) *Sanitizer {
+	s := &Sanitizer{
 		maxOutputLength: 8 * 1024, // 默认 8KB
 		enableBoundary:  true,
 		boundaryTag:     "tool_output",
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // SanitizerOption 配置选项
@@ -355,12 +359,16 @@ type AuditEvent struct {
 }
 
 // NewAuditLogger 创建审计日志记录器
-func NewAuditLogger() *AuditLogger {
-	return &AuditLogger{
+func NewAuditLogger(opts ...AuditLoggerOption) *AuditLogger {
+	al := &AuditLogger{
 		enabled:   true,
 		events:    make([]AuditEvent, 0),
 		maxEvents: 10000, // 最多保留 10000 条记录
 	}
+	for _, opt := range opts {
+		opt(al)
+	}
+	return al
 }
 
 // AuditLoggerOption 配置选项
