@@ -1,0 +1,22 @@
+# Binaries
+mini-kb
+mini-kb.exe
+
+# Storage
+.storage/
+*.json
+!go.mod
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+*.test
+*.out
